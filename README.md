@@ -1,5 +1,37 @@
 # call-automation
 
+# AI Patient Voice Tester
+
+Automated Python voice bot for testing a healthcare AI phone agent.
+
+## Current Status
+
+- [x] Outbound Twilio call working
+- [ ] Bidirectional audio streaming
+- [ ] Realtime patient agent
+- [ ] Call recording
+- [ ] Transcription
+- [ ] Automated evaluation
+- [ ] 10+ test scenarios
+
+## Setup
+
+### Requirements
+
+- Python 3.x
+- Twilio account with a Voice-enabled number
+
+### Environment Variables
+
+Copy `.env.example` to `.env`:
+
+```env
+TWILIO_ACCOUNT_SID=
+TWILIO_AUTH_TOKEN=
+TWILIO_PHONE_NUMBER=
+TEST_PHONE_NUMBER=
+
+
 What the patient need to answer or can call about
 
 They need to know who you are 
