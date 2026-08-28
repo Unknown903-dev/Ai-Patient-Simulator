@@ -1,0 +1,210 @@
+<svg
+    xmlns="http://www.w3.org/2000/svg"
+    width="900"
+    height="500"
+    viewBox="0 0 900 500"
+    role="img"
+    aria-labelledby="title description"
+>
+    <title id="title">Repository Traffic Analytics</title>
+    <desc id="description">
+        Traffic analytics for Unknown903-dev/call-automation showing views,
+        unique visitors, clones, and unique cloners.
+    </desc>
+
+    <style>
+        text {
+            font-family:
+                -apple-system,
+                BlinkMacSystemFont,
+                "Segoe UI",
+                Helvetica,
+                Arial,
+                sans-serif;
+        }
+
+        .title {
+            fill: #f0f6fc;
+            font-size: 24px;
+            font-weight: 600;
+        }
+
+        .subtitle {
+            fill: #8b949e;
+            font-size: 13px;
+        }
+
+        .axis {
+            fill: #8b949e;
+            font-size: 11px;
+        }
+
+        .metric {
+            fill: #f0f6fc;
+            font-size: 25px;
+            font-weight: 600;
+        }
+
+        .metric-label {
+            fill: #8b949e;
+            font-size: 13px;
+        }
+
+        .legend {
+            fill: #c9d1d9;
+            font-size: 12px;
+        }
+    </style>
+
+    <rect width="900" height="500" rx="12" fill="#0d1117" />
+
+    <text x="40" y="42" class="title">
+        Repository Traffic
+    </text>
+
+    <text x="40" y="66" class="subtitle">
+        Unknown903-dev/call-automation • latest 14 stored days
+    </text>
+
+    
+            <line
+                x1="55"
+                y1="90.0"
+                x2="845"
+                y2="90.0"
+                stroke="#30363d"
+                stroke-width="1"
+            />
+            <text
+                x="43"
+                y="95.0"
+                text-anchor="end"
+                class="axis"
+            >27</text>
+            
+            <line
+                x1="55"
+                y1="145.0"
+                x2="845"
+                y2="145.0"
+                stroke="#30363d"
+                stroke-width="1"
+            />
+            <text
+                x="43"
+                y="150.0"
+                text-anchor="end"
+                class="axis"
+            >20</text>
+            
+            <line
+                x1="55"
+                y1="200.0"
+                x2="845"
+                y2="200.0"
+                stroke="#30363d"
+                stroke-width="1"
+            />
+            <text
+                x="43"
+                y="205.0"
+                text-anchor="end"
+                class="axis"
+            >14</text>
+            
+            <line
+                x1="55"
+                y1="255.0"
+                x2="845"
+                y2="255.0"
+                stroke="#30363d"
+                stroke-width="1"
+            />
+            <text
+                x="43"
+                y="260.0"
+                text-anchor="end"
+                class="axis"
+            >7</text>
+            
+            <line
+                x1="55"
+                y1="310.0"
+                x2="845"
+                y2="310.0"
+                stroke="#30363d"
+                stroke-width="1"
+            />
+            <text
+                x="43"
+                y="315.0"
+                text-anchor="end"
+                class="axis"
+            >0</text>
+            
+
+    <polyline
+        points="55.0,310.0 115.8,310.0 176.5,310.0 237.3,310.0 298.1,310.0 358.8,310.0 419.6,310.0 480.4,310.0 541.2,310.0 601.9,310.0 662.7,310.0 723.5,310.0 784.2,310.0 845.0,90.0"
+        fill="none"
+        stroke="#58a6ff"
+        stroke-width="3"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+    />
+
+    <polyline
+        points="55.0,310.0 115.8,310.0 176.5,310.0 237.3,310.0 298.1,310.0 358.8,310.0 419.6,310.0 480.4,310.0 541.2,310.0 601.9,310.0 662.7,310.0 723.5,310.0 784.2,310.0 845.0,301.9"
+        fill="none"
+        stroke="#3fb950"
+        stroke-width="3"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+    />
+
+    <circle cx="610" cy="45" r="5" fill="#58a6ff" />
+    <text x="622" y="49" class="legend">Views</text>
+
+    <circle cx="690" cy="45" r="5" fill="#3fb950" />
+    <text x="702" y="49" class="legend">Unique visitors</text>
+
+    <text
+        x="55"
+        y="335"
+        class="axis"
+    >
+        2026-08-14
+    </text>
+
+    <text
+        x="845"
+        y="335"
+        text-anchor="end"
+        class="axis"
+    >
+        2026-08-27
+    </text>
+
+    <line
+        x1="40"
+        y1="355"
+        x2="860"
+        y2="355"
+        stroke="#30363d"
+    />
+
+    <text x="65" y="405" class="metric">27</text>
+    <text x="65" y="430" class="metric-label">Views</text>
+
+    <text x="265" y="405" class="metric">1</text>
+    <text x="265" y="430" class="metric-label">Unique visitors</text>
+
+    <text x="505" y="405" class="metric">8</text>
+    <text x="505" y="430" class="metric-label">Clones</text>
+
+    <text x="705" y="405" class="metric">7</text>
+    <text x="705" y="430" class="metric-label">Unique cloners</text>
+
+    <text x="40" y="475" class="subtitle">
+        Last updated: 2026-08-28 08:09 UTC
+    </text>
+</svg>
