@@ -1,9 +1,5 @@
 # call-automation
 
-## 📊 Repository Traffic
-
-![Repository Traffic](./traffic.svg)
-
 # AI Patient Voice Tester
 
 Automated Python voice bot for testing a healthcare AI phone agent.
