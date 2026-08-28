@@ -6,104 +6,42 @@ from pathlib import Path
 TOKEN = os.environ["TRAFFIC_TOKEN"]
 REPOSITORY = os.environ["GITHUB_REPOSITORY"]
 
-url = f"https://api.github.com/repos/{REPOSITORY}/traffic/views?per=day"
+HEADERS = {
+    "Accept": "application/vnd.github+json",
+    "Authorization": f"Bearer {TOKEN}",
+    "X-GitHub-Api-Version": "2026-03-10",
+    "User-Agent": "github-traffic-graph",
+}
 
-request = urllib.request.Request(
-    url,
-    headers={
-        "Accept": "application/vnd.github+json",
-        "Authorization": f"Bearer {TOKEN}",
-        "X-GitHub-Api-Version": "2026-03-10",
-        "User-Agent": "github-traffic-graph",
-    },
+
+def get_github_data(url):
+    request = urllib.request.Request(url, headers=HEADERS)
+
+    with urllib.request.urlopen(request) as response:
+        return json.load(response)
+
+
+views_data = get_github_data(
+    f"https://api.github.com/repos/{REPOSITORY}/traffic/views?per=day"
 )
 
-with urllib.request.urlopen(request) as response:
-    data = json.load(response)
-
-views = data["views"]
-
-WIDTH = 800
-HEIGHT = 300
-
-LEFT = 60
-RIGHT = 30
-TOP = 50
-BOTTOM = 60
-
-GRAPH_WIDTH = WIDTH - LEFT - RIGHT
-GRAPH_HEIGHT = HEIGHT - TOP - BOTTOM
-
-max_value = max(
-    [entry["count"] for entry in views]
-    + [entry["uniques"] for entry in views]
-    + [1]
+clones_data = get_github_data(
+    f"https://api.github.com/repos/{REPOSITORY}/traffic/clones?per=day"
 )
 
-def x_position(index):
-    if len(views) <= 1:
-        return LEFT
+total_views = views_data["count"]
+unique_visitors = views_data["uniques"]
 
-    return LEFT + (index / (len(views) - 1)) * GRAPH_WIDTH
-
-def y_position(value):
-    return TOP + GRAPH_HEIGHT - (value / max_value) * GRAPH_HEIGHT
-
-view_points = " ".join(
-    f"{x_position(i):.1f},{y_position(entry['count']):.1f}"
-    for i, entry in enumerate(views)
-)
-
-unique_points = " ".join(
-    f"{x_position(i):.1f},{y_position(entry['uniques']):.1f}"
-    for i, entry in enumerate(views)
-)
-
-total_views = data["count"]
-unique_visitors = data["uniques"]
-
-date_labels = ""
-
-for i, entry in enumerate(views):
-    if i % 2 == 0 or i == len(views) - 1:
-        date = entry["timestamp"][5:10]
-
-        date_labels += f"""
-        <text
-            x="{x_position(i):.1f}"
-            y="{HEIGHT - 25}"
-            font-size="11"
-            text-anchor="middle"
-            fill="#8b949e"
-        >
-            {date}
-        </text>
-        """
+total_clones = clones_data["count"]
+unique_cloners = clones_data["uniques"]
 
 svg = f"""
 <svg
     xmlns="http://www.w3.org/2000/svg"
-    width="{WIDTH}"
-    height="{HEIGHT}"
-    viewBox="0 0 {WIDTH} {HEIGHT}"
+    width="700"
+    height="180"
+    viewBox="0 0 700 180"
 >
-
-<style>
-    .title {{
-        font: bold 18px sans-serif;
-        fill: #c9d1d9;
-    }}
-
-    .stat {{
-        font: 14px sans-serif;
-        fill: #8b949e;
-    }}
-
-    .axis {{
-        stroke: #30363d;
-        stroke-width: 1;
-    }}
-</style>
 
 <rect
     width="100%"
@@ -114,70 +52,34 @@ svg = f"""
 
 <text
     x="30"
-    y="30"
-    class="title"
+    y="40"
+    font-family="sans-serif"
+    font-size="20"
+    font-weight="bold"
+    fill="#c9d1d9"
 >
     GitHub Repository Traffic
 </text>
 
 <text
-    x="770"
-    y="28"
-    class="stat"
-    text-anchor="end"
+    x="30"
+    y="85"
+    font-family="sans-serif"
+    font-size="17"
+    fill="#8b949e"
 >
-    {total_views} views · {unique_visitors} unique visitors
-</text>
-
-<line
-    x1="{LEFT}"
-    y1="{TOP + GRAPH_HEIGHT}"
-    x2="{WIDTH - RIGHT}"
-    y2="{TOP + GRAPH_HEIGHT}"
-    class="axis"
-/>
-
-<line
-    x1="{LEFT}"
-    y1="{TOP}"
-    x2="{LEFT}"
-    y2="{TOP + GRAPH_HEIGHT}"
-    class="axis"
-/>
-
-<polyline
-    points="{view_points}"
-    fill="none"
-    stroke="#58a6ff"
-    stroke-width="3"
-/>
-
-<polyline
-    points="{unique_points}"
-    fill="none"
-    stroke="#3fb950"
-    stroke-width="3"
-/>
-
-<text
-    x="{LEFT}"
-    y="{TOP - 10}"
-    font-size="12"
-    fill="#58a6ff"
->
-    Views
+    👀 {total_views} views · {unique_visitors} unique visitors
 </text>
 
 <text
-    x="{LEFT + 60}"
-    y="{TOP - 10}"
-    font-size="12"
-    fill="#3fb950"
+    x="30"
+    y="125"
+    font-family="sans-serif"
+    font-size="17"
+    fill="#8b949e"
 >
-    Unique visitors
+    📦 {total_clones} clones · {unique_cloners} unique cloners
 </text>
-
-{date_labels}
 
 </svg>
 """
@@ -187,5 +89,7 @@ Path("traffic.svg").write_text(svg)
 print(
     f"Generated traffic.svg: "
     f"{total_views} views, "
-    f"{unique_visitors} unique visitors"
+    f"{unique_visitors} unique visitors, "
+    f"{total_clones} clones, "
+    f"{unique_cloners} unique cloners"
 )
