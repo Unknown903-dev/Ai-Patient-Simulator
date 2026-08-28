@@ -2,7 +2,7 @@
 
 ## 📊 Repository Traffic
 
-![Repository Traffic](./traffic.svg)
+![Repository Traffic](./docs/traffic.svg)
 
 # AI Patient Voice Tester
 
