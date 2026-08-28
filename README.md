@@ -6,13 +6,39 @@ Automated Python voice bot for testing a healthcare AI phone agent.
 
 ## Current Status
 
-- [x] Outbound Twilio call working
-- [ ] Bidirectional audio streaming
-- [ ] Realtime patient agent
+- [x] Outbound Twilio calling
+- [x] FastAPI WebSocket server
+- [x] Twilio bidirectional Media Streams
+- [x] Incoming phone audio streamed to Python
+- [x] Python audio streamed back through Twilio
+- [ ] Realtime AI patient agent
+- [ ] Scenario engine
+- [ ] Natural turn-taking and interruption handling
 - [ ] Call recording
 - [ ] Transcription
-- [ ] Automated evaluation
-- [ ] 10+ test scenarios
+- [ ] Automated QA evaluation
+- [ ] 10+ final test calls
+
+## Development Architecture
+
+During local development, Cloudflare Tunnel exposes the local FastAPI
+WebSocket server to Twilio.
+
+```text
+Pretty Good AI
+      ↕
+     PSTN
+      ↕
+    Twilio
+      ↕
+Bidirectional Media Stream
+      ↕
+Cloudflare Tunnel
+      ↕
+FastAPI WebSocket Server
+      ↕
+    Python
+
 
 ## Setup
 
@@ -30,7 +56,8 @@ TWILIO_ACCOUNT_SID=
 TWILIO_AUTH_TOKEN=
 TWILIO_PHONE_NUMBER=
 TEST_PHONE_NUMBER=
-
+MEDIA_STREAM_URL=
+```
 
 What the patient need to answer or can call about
 
