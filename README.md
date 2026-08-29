@@ -6,7 +6,7 @@
 
 # AI Patient Voice Tester
 
-Automated Python voice bot for testing the Pretty Good AI healthcare phone agent.
+Automated Python voice bot for testing a healthcare phone agent.
 
 The bot places real outbound phone calls, behaves like a patient using Gemini Live, holds multi-turn voice conversations, and runs reusable scenarios designed to test normal workflows and edge cases in the target AI agent.
 
@@ -36,7 +36,7 @@ The bot places real outbound phone calls, behaves like a patient using Gemini Li
 ## How It Works
 
 ```text
-Pretty Good AI test agent
+     test agent
           ↕
          PSTN
           ↕
