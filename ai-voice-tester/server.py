@@ -3,20 +3,36 @@ import base64
 import json
 import math
 import os
+import shutil
 import struct
 import asyncio
 from datetime import datetime
+from pathlib import Path
+from urllib.parse import parse_qs, parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.request import Request as UrlRequest
+from urllib.request import urlopen
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import (
+    FastAPI,
+    HTTPException,
+    Request,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from google import genai
 from google.genai import types
+from twilio.request_validator import RequestValidator
 
 from scenarios import DEFAULT_SCENARIO, build_system_instruction, get_scenario
 
 load_dotenv()
 
 app = FastAPI()
+CALL_ARTIFACTS_DIR = Path(__file__).resolve().parent / "artifacts" / "calls"
+twilio_request_validator = RequestValidator(
+    os.environ["TWILIO_AUTH_TOKEN"]
+)
 
 
 def log(message: str) -> None:
@@ -25,8 +41,223 @@ def log(message: str) -> None:
     print(f"[{timestamp}] {message}", flush=True)
 
 
+def get_call_artifact_directory(call_sid: str) -> Path:
+    # find the folder for this call and make it when needed
+    # stop unsafe folder names from being used
+    if not call_sid or not call_sid.isalnum():
+        raise ValueError("invalid call sid")
+
+    call_directory = CALL_ARTIFACTS_DIR / call_sid
+    call_directory.mkdir(parents=True, exist_ok=True)
+    return call_directory
+
+
+def merge_call_metadata(call_sid: str, updates: dict) -> Path:
+    # add new details without losing what is already saved
+    call_directory = get_call_artifact_directory(call_sid)
+    metadata_path = call_directory / "metadata.json"
+    metadata = {}
+
+    # load the old details before adding the new ones
+    if metadata_path.exists():
+        with metadata_path.open("r", encoding="utf-8") as metadata_file:
+            metadata = json.load(metadata_file)
+
+    metadata.setdefault("call_sid", call_sid)
+    metadata.update(updates)
+
+    temporary_path = metadata_path.with_suffix(".json.part")
+    with temporary_path.open("w", encoding="utf-8") as metadata_file:
+        json.dump(metadata, metadata_file, indent=2, ensure_ascii=False)
+        metadata_file.write("\n")
+    temporary_path.replace(metadata_path)
+
+    return metadata_path
+
+
+def optional_integer(value: str):
+    # turn number text into a number when possible
+    # leave missing values empty
+    if not value:
+        return None
+
+    try:
+        return int(value)
+    except ValueError:
+        return value
+
+
+def recording_media_url(recording_url: str, channels) -> str:
+    # make a safe twilio mp3 link for the saved recording
+    parsed_url = urlsplit(recording_url)
+    hostname = (parsed_url.hostname or "").lower()
+    account_path = f"/Accounts/{os.environ['TWILIO_ACCOUNT_SID']}/"
+
+    # only send the account login to a matching twilio link
+    if not (
+        parsed_url.scheme == "https"
+        and (
+            hostname == "api.twilio.com"
+            or (
+                hostname.startswith("api.")
+                and hostname.endswith(".twilio.com")
+            )
+        )
+        and parsed_url.username is None
+        and parsed_url.password is None
+        and account_path in parsed_url.path
+    ):
+        raise ValueError("invalid twilio recording url")
+
+    media_path = parsed_url.path
+    # add the mp3 ending when twilio leaves it out
+    if not media_path.lower().endswith(".mp3"):
+        media_path = f"{media_path}.mp3"
+
+    query_values = dict(parse_qsl(parsed_url.query, keep_blank_values=True))
+    # ask twilio to keep both sides in separate channels
+    if channels == 2:
+        query_values["RequestedChannels"] = "2"
+
+    return urlunsplit(
+        (
+            parsed_url.scheme,
+            parsed_url.netloc,
+            media_path,
+            urlencode(query_values),
+            parsed_url.fragment,
+        )
+    )
+
+
+def download_recording(recording_url: str, destination: Path) -> None:
+    # download the recording with the twilio account login
+    credentials = base64.b64encode(
+        (
+            f"{os.environ['TWILIO_ACCOUNT_SID']}:"
+            f"{os.environ['TWILIO_AUTH_TOKEN']}"
+        ).encode("utf-8")
+    ).decode("ascii")
+    download_request = UrlRequest(
+        recording_url,
+        headers={"Authorization": f"Basic {credentials}"},
+    )
+    temporary_path = destination.with_suffix(".mp3.part")
+
+    try:
+        with urlopen(download_request, timeout=60) as response:
+            with temporary_path.open("wb") as recording_file:
+                shutil.copyfileobj(response, recording_file)
+        temporary_path.replace(destination)
+    except Exception:
+        temporary_path.unlink(missing_ok=True)
+        raise
+
+
 @app.get("/")
 async def health_check():
+    return {"status": "ok"}
+
+
+@app.post("/recording-status")
+async def recording_status(request: Request):
+    # handle recording updates sent by twilio
+    body = await request.body()
+    form_values = parse_qs(
+        body.decode("utf-8"),
+        keep_blank_values=True,
+    )
+    callback = {
+        key: values[-1]
+        for key, values in form_values.items()
+    }
+
+    signature = request.headers.get("X-Twilio-Signature", "")
+    request_url = str(request.url)
+
+    # stop requests that were not signed by twilio
+    if not twilio_request_validator.validate(
+        request_url,
+        callback,
+        signature,
+    ):
+        log("invalid twilio recording callback signature")
+        raise HTTPException(status_code=403, detail="forbidden")
+
+    call_sid = callback.get("CallSid", "")
+    recording_sid = callback.get("RecordingSid", "")
+    status = callback.get("RecordingStatus", "").lower()
+
+    try:
+        call_directory = get_call_artifact_directory(call_sid)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+    log(f"recording callback received for {call_sid}")
+
+    # save the result when twilio could not make a recording
+    if status == "absent":
+        merge_call_metadata(
+            call_sid,
+            {
+                "recording_sid": recording_sid,
+                "recording_status": "absent",
+                "recording_error_code": callback.get("ErrorCode", ""),
+            },
+        )
+        log(f"recording absent for {call_sid}")
+        return {"status": "ok"}
+
+    # skip updates that do not need more work
+    if status != "completed":
+        return {"status": "ignored"}
+
+    recording_url = callback.get("RecordingUrl", "")
+    # stop when twilio does not send a download link
+    if not recording_url:
+        raise HTTPException(status_code=400, detail="missing recording url")
+
+    recording_channels = optional_integer(
+        callback.get("RecordingChannels", "")
+    )
+    recording_metadata = {
+        "recording_sid": recording_sid,
+        "recording_status": "completed",
+        "recording_duration_seconds": optional_integer(
+            callback.get("RecordingDuration", "")
+        ),
+        "recording_channels": recording_channels,
+        "recording_start_time": callback.get("RecordingStartTime", ""),
+        "recording_source": callback.get("RecordingSource", ""),
+        "recording_track": callback.get("RecordingTrack", ""),
+    }
+    merge_call_metadata(call_sid, recording_metadata)
+
+    destination = call_directory / "recording.mp3"
+    try:
+        media_url = recording_media_url(recording_url, recording_channels)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+    try:
+        await asyncio.to_thread(
+            download_recording,
+            media_url,
+            destination,
+        )
+    except Exception as error:
+        log(f"recording download failed for {call_sid}")
+        raise HTTPException(
+            status_code=502,
+            detail="recording download failed",
+        ) from error
+
+    merge_call_metadata(
+        call_sid,
+        {"recording_file": "recording.mp3"},
+    )
+    log(f"recording completed {recording_sid}")
+    log(f"recording saved to {destination}")
     return {"status": "ok"}
 
 
