@@ -204,6 +204,7 @@ class CallTranscript:
     def save(self) -> Path:
         # write the whole transcript at the end of the call
         self.flush_all()
+        self.call_directory.mkdir(parents=True, exist_ok=True)
         transcript_path = self.call_directory / "transcript.txt"
         temporary_path = transcript_path.with_suffix(".txt.part")
         lines = [
@@ -556,6 +557,8 @@ async def run_gemini_session(
         final_goodbye_mark = "final-goodbye-finished"
         drop_current_gemini_audio = False
         gemini_generation_active = False
+        gemini_turn_complete_event = asyncio.Event()
+        gemini_turn_complete_event.set()
         diagnostic_office_turn = None
         diagnostic_activity_end_time = None
         diagnostic_audio_bytes = 0
@@ -569,7 +572,7 @@ async def run_gemini_session(
         ) -> None:
             # report when gemini stays quiet after an office turn
             try:
-                await asyncio.sleep(5.0)
+                await asyncio.sleep(3.0)
 
                 if (
                     diagnostic_office_turn == office_turn
@@ -584,6 +587,7 @@ async def run_gemini_session(
                         f"seconds_since_activity_end="
                         f"{seconds_since_activity_end:.1f}"
                     )
+
             except asyncio.CancelledError:
                 pass
 
@@ -671,7 +675,6 @@ async def run_gemini_session(
                 )
 
                 if text:
-                    acknowledge_gemini_activity()
                     log(f"PERSON: {text}")
                     transcript.add_fragment("OFFICE", text)
 
@@ -702,6 +705,7 @@ async def run_gemini_session(
 
                     acknowledge_gemini_activity()
                     gemini_generation_active = True
+                    gemini_turn_complete_event.clear()
 
                     if drop_current_gemini_audio:
                         continue
@@ -825,8 +829,8 @@ async def run_gemini_session(
                 1200.0,
             )
 
-            # hold about 100 ms of audio
-            gemini_chunk_size = 3200
+            # send about 40 ms of audio at a time
+            gemini_chunk_size = 1280
 
             async def send_buffered_audio(force: bool = False):
                 nonlocal office_turn_audio_bytes
@@ -908,6 +912,25 @@ async def run_gemini_session(
                         silence_ms = 0.0
 
                         if not activity_active:
+                            if (
+                                gemini_generation_active
+                                and drop_current_gemini_audio
+                            ):
+                                log(
+                                    "waiting for interrupted gemini turn "
+                                    "to close before next office turn"
+                                )
+                                try:
+                                    await asyncio.wait_for(
+                                        gemini_turn_complete_event.wait(),
+                                        timeout=2.0,
+                                    )
+                                except asyncio.TimeoutError:
+                                    log(
+                                        "interrupted gemini turn close wait "
+                                        "timed out"
+                                    )
+
                             await session.send_realtime_input(
                                 activity_start=types.ActivityStart()
                             )
@@ -1086,6 +1109,7 @@ async def run_gemini_session(
                 # allow audio from the next gemini turn after an interruption
                 drop_current_gemini_audio = False
                 gemini_generation_active = False
+                gemini_turn_complete_event.set()
 
                 if gemini_playback_pending:
                     if finalizing_call and final_goodbye_audio_sent:
