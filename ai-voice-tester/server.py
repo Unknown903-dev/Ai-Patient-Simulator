@@ -12,6 +12,8 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from google import genai
 from google.genai import types
 
+from scenarios import build_system_instruction, get_scenario
+
 load_dotenv()
 
 app = FastAPI()
@@ -62,7 +64,11 @@ def generate_test_tone(
 
 
 
-async def run_gemini_call(websocket: WebSocket, stream_sid: str):
+async def run_gemini_call(
+    websocket: WebSocket,
+    stream_sid: str,
+    scenario: dict,
+):
 
     client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
     model = os.environ["GEMINI_LIVE_MODEL"]
@@ -70,15 +76,7 @@ async def run_gemini_call(websocket: WebSocket, stream_sid: str):
     config = {
         "response_modalities": ["AUDIO"],
 
-        "system_instruction": (
-            "You are Alex Smith, a patient calling a doctor's office to "
-            "schedule an appointment about knee pain. Your date of birth is "
-            "January 1, 1990. Keep your responses short and natural because "
-            "this is a real-time phone conversation. Wait for the office to "
-            "finish its greeting or ask you a question before speaking. Do "
-            "not respond to recording disclosures or automated language-menu "
-            "instructions."
-        ),
+        "system_instruction": build_system_instruction(scenario),
 
         # show what the person says
         "input_audio_transcription": {},
@@ -414,11 +412,26 @@ async def media_stream(websocket: WebSocket):
                 #call SID identifies the entire phone call in twilio
                 call_sid = data["start"]["callSid"]
 
+                custom_parameters = data["start"].get(
+                    "customParameters",
+                    {},
+                )
+                scenario_name = custom_parameters.get(
+                    "scenario",
+                    "schedule_knee_pain",
+                )
+                scenario = get_scenario(scenario_name)
+
                 log(f"Stream SID: {stream_sid}")
                 log(f"Call SID: {call_sid}")
+                log(f"Scenario: {scenario_name}")
                 
                 #use one gemini session for the whole call
-                await run_gemini_call(websocket, stream_sid)
+                await run_gemini_call(
+                    websocket,
+                    stream_sid,
+                    scenario,
+                )
 
                 break
 
