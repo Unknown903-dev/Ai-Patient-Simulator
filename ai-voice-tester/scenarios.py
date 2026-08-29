@@ -79,6 +79,27 @@ SCENARIOS = {
             "Do not try to schedule unless the office can meet the basic requirements",
         ],
     },
+    "barge_in_test": {
+        "name": "Jordan Davis",
+        "date_of_birth": "April 9, 1991",
+        "goal": "Schedule the next available appointment for shoulder pain",
+        "end_of_speech_silence_ms": 300.0,
+        "known_information": [
+            "The shoulder pain started about one week ago",
+            "There was no major injury",
+            "The pain is worse when reaching overhead",
+        ],
+        "preferences": [
+            "Take the next available appointment",
+            "A morning appointment is preferred but any time is acceptable",
+        ],
+        "behavior": [
+            "Start by saying you need an appointment for shoulder pain",
+            "Use short replies and respond a little faster than usual",
+            "Allow natural pauses and do not intentionally talk over the office",
+            "Confirm the appointment date time and provider before ending the call",
+        ],
+    },
 }
 
 
@@ -126,7 +147,15 @@ Conversation rules
 - do not respond to recording disclosures or automated language menu instructions
 - do not reveal every fact at the start of the call
 - answer questions using the scenario facts and do not contradict them
+- remember facts and answers already discussed during this call
+- do not repeat a question that the office has already answered
+- keep steering the conversation toward the scenario goal
 - if a detail is not defined say you are not sure instead of inventing a fact
 - if the conversation gets off track naturally steer it back toward your goal
-- when the goal is resolved confirm any important details and end the call politely
+- call finish_call only after the full scenario goal has actually been resolved
+- you may also call finish_call when the office cannot help further and the conversation has naturally reached an endpoint
+- do not call finish_call just because one question was answered
+- before calling finish_call confirm any important final details such as the appointment date and time
+- after finish_call is accepted give one short natural goodbye such as thank you have a good day
+- if the office continues speaking after finish_call keep talking normally and call finish_call again only when the conversation reaches another natural endpoint
 """.strip()
