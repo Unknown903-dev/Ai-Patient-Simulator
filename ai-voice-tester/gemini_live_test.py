@@ -101,7 +101,7 @@ async def main():
                             #extract raw pcm audio bytes
                             audio_chunk = part.inline_data.data
 
-                            print("Received audio chunk: {len(audio_chunk)} bytes")
+                            print(f"Received audio chunk: {len(audio_chunk)} bytes")
 
                             # this is what makes gemini audible through your computer.
                             speaker.write(audio_chunk)
