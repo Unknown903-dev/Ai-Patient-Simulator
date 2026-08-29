@@ -54,36 +54,32 @@ def generate_test_tone(
     return base64.b64encode(mulaw_audio).decode("utf-8")
 
 
-async def send_gemini_opening(websocket: WebSocket, stream_sid: str):
-    """
-    Ask Gemini Live to generate one spoken sentence,
-    convert the 24 kHz PCM response into Twilio's
-    8 kHz G.711 mu-law format, and send it into the call
-    """
+
+async def run_gemini_call(websocket: WebSocket, stream_sid: str):
 
     client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
     model = os.environ["GEMINI_LIVE_MODEL"]
 
-    # ask gemini for an audio response and transcription
     config = {
         "response_modalities": ["AUDIO"],
+
+        # show what the person says
+        "input_audio_transcription": {},
+
+        # show what gemini says
         "output_audio_transcription": {},
     }
 
-    # keep resampling state between streamed audio chunks
-    resample_state = None
+    print(f"Connecting Gemini Live using {model}...")
 
-    print(f"Connecting to Gemini Live using {model}...")
-
-    # open the gemini live session
     async with client.aio.live.connect(
         model=model,
         config=config,
     ) as session:
 
-        print("Gemini Live connected")
+        print("Gemini Live session connected.")
 
-        # ask gemini to speak our test opening line
+        # send the first message to gemini
         await session.send_client_content(
             turns={
                 "role": "user",
@@ -91,7 +87,10 @@ async def send_gemini_opening(websocket: WebSocket, stream_sid: str):
                     {
                         "text": (
                             "You are a patient calling a doctor's office. "
-                            "Say exactly: Hi, I'd like to schedule an appointment."
+                            "Keep your responses short and natural because "
+                            "this is a real-time phone conversation. "
+                            "Begin by saying: "
+                            "Hi, I'd like to schedule an appointment."
                         )
                     }
                 ],
@@ -99,228 +98,275 @@ async def send_gemini_opening(websocket: WebSocket, stream_sid: str):
             turn_complete=True,
         )
 
-        print("Asked Gemini to generate opening line")
+        print("Opening instruction sent.")
 
-        # receive gemini streamed response
-        async for response in session.receive():
+        # handle messages coming from gemini
+        async def handle_gemini_response(
+            response,
+            output_state,
+        ):
 
-            # Print the transcription so we can see what Gemini said
-            if (
-                response.server_content
-                and response.server_content.output_transcription
-            ):
-                transcript = (
-                    response.server_content
+            server_content = response.server_content
+
+            if not server_content:
+                return output_state
+
+            # print what the person says
+            if server_content.input_transcription:
+
+                text = (
+                    server_content
+                    .input_transcription
+                    .text
+                )
+
+                if text:
+                    print(f"PERSON: {text}",
+                        flush=True,
+                    )
+
+            # print what gemini says
+            if server_content.output_transcription:
+
+                text = (
+                    server_content
                     .output_transcription
                     .text
                 )
 
-                if transcript:
-                    print(f"Gemini said: {transcript}")
+                if text:
+                    print(f"GEMINI: {text}",
+                        flush=True,
+                    )
 
-            # response.data contains Gemini's raw 24 kHz PCM audio
-            if response.data:
+            # get audio made by gemini
+            if server_content.model_turn:
 
-                # resample gemini audio from 24 kHz PCM to 8 kHz PCM
-                pcm_8k, resample_state = audioop.ratecv(
-                    response.data,
-                    2,      # 16-bit samples = 2 bytes
-                    1,      # mono
-                    24000,  # gemini output sample rate
-                    8000,   # twilio sample rate
-                    resample_state,
-                )
+                for part in server_content.model_turn.parts:
 
-                # convert linear PCM into G.711 mu-law
-                mulaw_audio = audioop.lin2ulaw(pcm_8k, 2)
+                    if not (
+                        part.inline_data
+                        and part.inline_data.data
+                    ):
+                        continue
 
-                # twilio expects the mu-law bytes as Base64 text
-                payload = base64.b64encode(mulaw_audio).decode("utf-8")
+                    pcm_24k = part.inline_data.data
 
-                # send this Gemini audio chunk into the live phone call
-                await websocket.send_json(
-                    {
-                        "event": "media",
-                        "streamSid": stream_sid,
-                        "media": {"payload": payload},
-                    }
-                )
+                    # change gemini audio from 24 khz to 8 khz
+                    pcm_8k, output_state = audioop.ratecv(
+                        pcm_24k,
+                        2,
+                        1,
+                        24000,
+                        8000,
+                        output_state,
+                    )
 
-    print("Finished sending Gemini opening line")
+                    # change pcm audio into mulaw audio
+                    mulaw_8k = audioop.lin2ulaw(
+                        pcm_8k,
+                        2,
+                    )
 
-async def transcribe_caller_audio(websocket: WebSocket):
-    """
-    Receive caller audio from Twilio, convert it from
-    8 kHz G.711 mu-law into 16 kHz PCM, send it to
-    Gemini Live, and print Gemini's transcription
-    NOT sent back to the phone yet.
-    """
+                    # turn the audio into base64 for twilio
+                    payload = base64.b64encode(
+                        mulaw_8k
+                    ).decode("utf-8")
 
-    # Create a Gemini client using the API key in .env.
-    client = genai.Client(
-        api_key=os.environ["GEMINI_API_KEY"]
-    )
+                    # send gemini audio into the phone call
+                    await websocket.send_json(
+                        {
+                            "event": "media",
+                            "streamSid": stream_sid,
+                            "media": {"payload": payload},
+                        }
+                    )
+            return output_state
 
-    model = os.environ["GEMINI_LIVE_MODEL"]
+        # wait for gemini to finish the first message
+        output_state = None
 
-    # ask gemini to transcribe incoming caller audio
-    config = {
-        "response_modalities": ["AUDIO"],
-        "input_audio_transcription": {},
-    }
+        async for response in session.receive():
+            output_state = await handle_gemini_response(
+                response,
+                output_state,
+            )
 
-    # audioop.ratecv keeps state between audio chunks
-    resample_state = None
+        print("Gemini opening sent to phone.")
 
-    # Buffer converted PCM so we send Gemini about
-    # 100 ms of audio at a time
-    pcm_buffer = bytearray()
+        # ask twilio to tell us when the first message is done playing
+        await websocket.send_json(
+            {
+                "event": "mark",
+                "streamSid": stream_sid,
+                "mark": {"name": "gemini-opening-finished"},
+            }
+        )
 
-    # 16,000 samples/sec × 2 bytes/sample × 0.1 sec
-    gemini_chunk_size = 3200
+        # send phone audio into gemini
+        async def twilio_to_gemini():
 
-    print("Connecting caller audio to Gemini Live...")
+            input_resample_state = None
+            pcm_buffer = bytearray()
 
-    async with client.aio.live.connect(
-        model=model,
-        config=config,
-    ) as session:
+            # hold about 100 ms of audio
+            gemini_chunk_size = 3200
 
-        print("Caller transcription session connected.")
-
-        # gemini responses need to be read at the same
-        # time that twilio audio is being sent
-        async def receive_transcriptions():
-
-            try:
-
-                # session.receive() finishes after a model turn
-                # so restart it to support continued speech
-                while True:
-
-                    async for response in session.receive():
-
-                        server_content = response.server_content
-
-                        if not server_content:
-                            continue
-
-                        # geminis transcription of the caller
-                        if server_content.input_transcription:
-
-                            text = (
-                                server_content
-                                .input_transcription
-                                .text
-                            )
-
-                            if text:
-                                print(f"Caller said: {text}", 
-                                flush=True)
-
-            except asyncio.CancelledError:
-                pass
-
-        # run geminis receive side in the background
-        receive_task = asyncio.create_task(receive_transcriptions())
-
-        try:
-
-            # continue receiving twilio WebSocket events until call ends
             while True:
 
                 message = await websocket.receive_text()
-
                 data = json.loads(message)
-
                 event = data.get("event")
 
-                # twilio sends caller audio in media events.
+                # get audio from the phone call
                 if event == "media":
 
-                    payload = data["media"]["payload"]
+                    payload = (data["media"]["payload"])
 
-                    # decode twilios Base64 audio payload
-                    mulaw_8k = base64.b64decode(
-                        payload
-                    )
+                    # change base64 into raw mulaw audio
+                    mulaw_8k = base64.b64decode(payload)
 
-                    # convert G.711 mu-law into signed
-                    # 16-bit linear PCM at 8 kHz
+                    # change mulaw audio into pcm audio
                     pcm_8k = audioop.ulaw2lin(
                         mulaw_8k,
                         2,
                     )
 
-                    # resample the caller from twilio
-                    # 8 kHz audio to gemini's 16 kHz input
-                    pcm_16k, resample_state = audioop.ratecv(
+                    # change phone audio from 8 khz to 16 khz
+
+                    (pcm_16k, input_resample_state) = audioop.ratecv(
                         pcm_8k,
-                        2,      # 16-bit samples
-                        1,      # mono
-                        8000,   # Twilio sample rate
-                        16000,  # Gemini input sample rate
-                        resample_state,
+                        2,
+                        1,
+                        8000,
+                        16000,
+                        input_resample_state,
                     )
 
-                    # add the converted audio to our buffer
                     pcm_buffer.extend(pcm_16k)
 
-                    # send gemini approximately 100 ms chunks of PCM audio
-                    while len(pcm_buffer) >= gemini_chunk_size:
+                    # send audio to gemini when enough is ready
+                    while (len(pcm_buffer) >= gemini_chunk_size):
 
-                        audio_chunk = bytes(pcm_buffer[:gemini_chunk_size])
+                        audio_chunk = bytes(
+                            pcm_buffer[:gemini_chunk_size]
+                        )
 
                         del pcm_buffer[:gemini_chunk_size]
 
                         await session.send_realtime_input(
                             audio=types.Blob(
                                 data=audio_chunk,
-                                mime_type="audio/pcm;rate=16000",
+                                mime_type=(
+                                    "audio/pcm;"
+                                    "rate=16000"
+                                ),
                             )
                         )
 
-                # twilio sends our mark back when previously queued audio has finished playing.
+                # get a message when twilio finishes playing audio
                 elif event == "mark":
-
                     mark_name = data["mark"]["name"]
 
-                    print(
-                        f"Audio playback completed: {mark_name}"
-                    )
+                    print(f"Audio playback completed: {mark_name}")
 
-                # twilio sends stop when the phone stream ends
+                # stop when the phone call ends
                 elif event == "stop":
 
-                    print("Media stream stopped")
+                    print("Twilio media stream stopped.")
 
-                    # send any final audio that did not fill an entire 100 ms chunk
+                    # send any audio still left in the buffer
                     if pcm_buffer:
-
                         await session.send_realtime_input(
                             audio=types.Blob(
                                 data=bytes(pcm_buffer),
-                                mime_type="audio/pcm;rate=16000",
+                                mime_type=(
+                                    "audio/pcm;"
+                                    "rate=16000"
+                                ),
                             )
                         )
 
-                    # tell gemini no more caller audio is coming
-                    await session.send_realtime_input(audio_stream_end=True)
+                    # tell gemini the phone audio has ended
+                    await session.send_realtime_input(
+                        audio_stream_end=True
+                    )
 
-                    break
+                    return
 
-        finally:
+        # send gemini audio back into the phone call
+        async def gemini_to_twilio():
 
-            # stop gemini's background receive loop
-            receive_task.cancel()
+            output_resample_state = None
+            turn_number = 1
 
+            while True:
+                # listen for the next message from gemini
+                async for response in session.receive():
+
+                    output_resample_state = (
+                        await handle_gemini_response(
+                            response,
+                            output_resample_state,
+                        )
+                    )
+
+                # gemini finished one turn
+
+                print(f"Gemini turn {turn_number} complete.")
+
+                # ask twilio to tell us when the audio is done playing
+                await websocket.send_json(
+                    {
+                        "event": "mark",
+                        "streamSid": stream_sid,
+                        "mark": {"name": (f"gemini-turn-{turn_number}")},
+                    }
+                )
+
+                turn_number += 1
+
+                # reset the audio change state for the next turn
+                output_resample_state = None
+
+        # run phone audio and gemini audio at the same time
+        phone_task = asyncio.create_task(twilio_to_gemini())
+
+        gemini_task = asyncio.create_task(gemini_to_twilio())
+
+        print("\n====================================")
+        print("TWO-WAY GEMINI CALL IS LIVE")
+        print("====================================\n")
+
+        # wait until one side of the call stops
+        done, pending = await asyncio.wait(
+            [phone_task, gemini_task,],
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+
+        # stop any task that is still running
+        for task in pending:
+            task.cancel()
+
+        # wait for stopped tasks to finish
+        for task in pending:
             try:
-                await receive_task
+                await task
 
             except asyncio.CancelledError:
                 pass
 
-    print("Caller transcription session closed.")
+        # show any error that happened
+        for task in done:
+            if task.cancelled():
+                continue
+
+            exception = task.exception()
+
+            if exception:
+                raise exception
+
+    print("Gemini phone session closed.")
 
 @app.websocket("/media-stream")
 async def media_stream(websocket: WebSocket):
@@ -355,23 +401,10 @@ async def media_stream(websocket: WebSocket):
 
                 print(f"Stream SID: {stream_sid}")
                 print(f"Call SID: {call_sid}")
+                
+                #use one gemini session for the whole call
+                await run_gemini_call(websocket, stream_sid)
 
-                # generate gemini speech and send it to live Twilio call
-                await send_gemini_opening(websocket, stream_sid)
-
-                # ask twilio to notify us when the Gemini audio finishes playing
-                await websocket.send_json(
-                    {
-                        "event": "mark",
-                        "streamSid": stream_sid,
-                        "mark": {"name": "gemini-opening-finished"},
-                    }
-                )
-
-                print("Sent Gemini opening audio")
-
-                # now listen to the caller and send their voice to gemini
-                await transcribe_caller_audio(websocket)
                 break
 
             elif event == "media":
