@@ -5,6 +5,7 @@ import math
 import os
 import struct
 import asyncio
+from datetime import datetime
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -14,6 +15,12 @@ from google.genai import types
 load_dotenv()
 
 app = FastAPI()
+
+
+def log(message: str) -> None:
+    """show the time for each event"""
+    timestamp = datetime.now().astimezone().isoformat(timespec="milliseconds")
+    print(f"[{timestamp}] {message}", flush=True)
 
 
 @app.get("/")
@@ -63,42 +70,38 @@ async def run_gemini_call(websocket: WebSocket, stream_sid: str):
     config = {
         "response_modalities": ["AUDIO"],
 
+        "system_instruction": (
+            "You are Alex Smith, a patient calling a doctor's office to "
+            "schedule an appointment about knee pain. Your date of birth is "
+            "January 1, 1990. Keep your responses short and natural because "
+            "this is a real-time phone conversation. Wait for the office to "
+            "finish its greeting or ask you a question before speaking. Do "
+            "not respond to recording disclosures or automated language-menu "
+            "instructions."
+        ),
+
         # show what the person says
         "input_audio_transcription": {},
 
         # show what gemini says
         "output_audio_transcription": {},
+
+        # turn off gemini speech checks so we can mark each turn ourselves
+        "realtime_input_config": {
+            "automatic_activity_detection": {
+                "disabled": True,
+            }
+        },
     }
 
-    print(f"Connecting Gemini Live using {model}...")
+    log(f"Connecting Gemini Live using {model}...")
 
     async with client.aio.live.connect(
         model=model,
         config=config,
     ) as session:
 
-        print("Gemini Live session connected.")
-
-        # send the first message to gemini
-        await session.send_client_content(
-            turns={
-                "role": "user",
-                "parts": [
-                    {
-                        "text": (
-                            "You are a patient calling a doctor's office. "
-                            "Keep your responses short and natural because "
-                            "this is a real-time phone conversation. "
-                            "Begin by saying: "
-                            "Hi, I'd like to schedule an appointment."
-                        )
-                    }
-                ],
-            },
-            turn_complete=True,
-        )
-
-        print("Opening instruction sent.")
+        log("Gemini Live session connected.")
 
         # handle messages coming from gemini
         async def handle_gemini_response(
@@ -121,9 +124,7 @@ async def run_gemini_call(websocket: WebSocket, stream_sid: str):
                 )
 
                 if text:
-                    print(f"PERSON: {text}",
-                        flush=True,
-                    )
+                    log(f"PERSON: {text}")
 
             # print what gemini says
             if server_content.output_transcription:
@@ -135,9 +136,7 @@ async def run_gemini_call(websocket: WebSocket, stream_sid: str):
                 )
 
                 if text:
-                    print(f"GEMINI: {text}",
-                        flush=True,
-                    )
+                    log(f"GEMINI: {text}")
 
             # get audio made by gemini
             if server_content.model_turn:
@@ -183,34 +182,40 @@ async def run_gemini_call(websocket: WebSocket, stream_sid: str):
                     )
             return output_state
 
-        # wait for gemini to finish the first message
-        output_state = None
-
-        async for response in session.receive():
-            output_state = await handle_gemini_response(
-                response,
-                output_state,
-            )
-
-        print("Gemini opening sent to phone.")
-
-        # ask twilio to tell us when the first message is done playing
-        await websocket.send_json(
-            {
-                "event": "mark",
-                "streamSid": stream_sid,
-                "mark": {"name": "gemini-opening-finished"},
-            }
-        )
-
         # send phone audio into gemini
         async def twilio_to_gemini():
 
             input_resample_state = None
             pcm_buffer = bytearray()
 
+            # remember if the office is speaking and how long it is quiet
+            activity_active = False
+            silence_ms = 0.0
+
+            # phone lines have noise so louder audio counts as speech
+            speech_rms_threshold = 500
+
+            # end the turn after this much quiet audio
+            end_of_speech_silence_ms = 600.0
+
             # hold about 100 ms of audio
             gemini_chunk_size = 3200
+
+            async def send_buffered_audio(force: bool = False):
+                # send full chunks or send everything when the turn ends
+                while len(pcm_buffer) >= gemini_chunk_size or (
+                    force and pcm_buffer
+                ):
+                    chunk_size = min(len(pcm_buffer), gemini_chunk_size)
+                    audio_chunk = bytes(pcm_buffer[:chunk_size])
+                    del pcm_buffer[:chunk_size]
+
+                    await session.send_realtime_input(
+                        audio=types.Blob(
+                            data=audio_chunk,
+                            mime_type="audio/pcm;rate=16000",
+                        )
+                    )
 
             while True:
 
@@ -232,6 +237,25 @@ async def run_gemini_call(websocket: WebSocket, stream_sid: str):
                         2,
                     )
 
+                    frame_duration_ms = (
+                        len(pcm_8k) / 2 / 8000 * 1000
+                    )
+                    frame_rms = audioop.rms(pcm_8k, 2)
+
+                    # tell gemini when the office starts speaking
+                    if frame_rms >= speech_rms_threshold:
+                        silence_ms = 0.0
+
+                        if not activity_active:
+                            await session.send_realtime_input(
+                                activity_start=types.ActivityStart()
+                            )
+                            activity_active = True
+                            log(f"VAD speech started (RMS={frame_rms})")
+
+                    elif activity_active:
+                        silence_ms += frame_duration_ms
+
                     # change phone audio from 8 khz to 16 khz
 
                     (pcm_16k, input_resample_state) = audioop.ratecv(
@@ -246,45 +270,38 @@ async def run_gemini_call(websocket: WebSocket, stream_sid: str):
                     pcm_buffer.extend(pcm_16k)
 
                     # send audio to gemini when enough is ready
-                    while (len(pcm_buffer) >= gemini_chunk_size):
+                    await send_buffered_audio()
 
-                        audio_chunk = bytes(
-                            pcm_buffer[:gemini_chunk_size]
-                        )
-
-                        del pcm_buffer[:gemini_chunk_size]
-
+                    if (
+                        activity_active
+                        and silence_ms >= end_of_speech_silence_ms
+                    ):
+                        # send all speech before telling gemini the turn is done
+                        await send_buffered_audio(force=True)
                         await session.send_realtime_input(
-                            audio=types.Blob(
-                                data=audio_chunk,
-                                mime_type=(
-                                    "audio/pcm;"
-                                    "rate=16000"
-                                ),
-                            )
+                            activity_end=types.ActivityEnd()
                         )
+                        activity_active = False
+                        silence_ms = 0.0
+                        log("VAD speech ended after 600 ms silence")
 
                 # get a message when twilio finishes playing audio
                 elif event == "mark":
                     mark_name = data["mark"]["name"]
 
-                    print(f"Audio playback completed: {mark_name}")
+                    log(f"Audio playback completed: {mark_name}")
 
                 # stop when the phone call ends
                 elif event == "stop":
 
-                    print("Twilio media stream stopped.")
+                    log("Twilio media stream stopped.")
 
                     # send any audio still left in the buffer
-                    if pcm_buffer:
+                    await send_buffered_audio(force=True)
+
+                    if activity_active:
                         await session.send_realtime_input(
-                            audio=types.Blob(
-                                data=bytes(pcm_buffer),
-                                mime_type=(
-                                    "audio/pcm;"
-                                    "rate=16000"
-                                ),
-                            )
+                            activity_end=types.ActivityEnd()
                         )
 
                     # tell gemini the phone audio has ended
@@ -313,7 +330,7 @@ async def run_gemini_call(websocket: WebSocket, stream_sid: str):
 
                 # gemini finished one turn
 
-                print(f"Gemini turn {turn_number} complete.")
+                log(f"Gemini turn {turn_number} complete.")
 
                 # ask twilio to tell us when the audio is done playing
                 await websocket.send_json(
@@ -334,9 +351,7 @@ async def run_gemini_call(websocket: WebSocket, stream_sid: str):
 
         gemini_task = asyncio.create_task(gemini_to_twilio())
 
-        print("\n====================================")
-        print("TWO-WAY GEMINI CALL IS LIVE")
-        print("====================================\n")
+        log("TWO-WAY GEMINI CALL IS LIVE")
 
         # wait until one side of the call stops
         done, pending = await asyncio.wait(
@@ -366,7 +381,7 @@ async def run_gemini_call(websocket: WebSocket, stream_sid: str):
             if exception:
                 raise exception
 
-    print("Gemini phone session closed.")
+    log("Gemini phone session closed.")
 
 @app.websocket("/media-stream")
 async def media_stream(websocket: WebSocket):
@@ -375,7 +390,7 @@ async def media_stream(websocket: WebSocket):
     #accept incoming websocket connections
     await websocket.accept()
 
-    print("WebSocket connected")
+    log("WebSocket connected")
 
     try:
         while True:
@@ -388,7 +403,7 @@ async def media_stream(websocket: WebSocket):
             event = data.get("event")
 
             if event == "connected":
-                print("Twilio media stream connected")
+                log("Twilio media stream connected")
             
             # sent when audio stream start
             # This contains useful identifiers for the stream and phone call
@@ -399,8 +414,8 @@ async def media_stream(websocket: WebSocket):
                 #call SID identifies the entire phone call in twilio
                 call_sid = data["start"]["callSid"]
 
-                print(f"Stream SID: {stream_sid}")
-                print(f"Call SID: {call_sid}")
+                log(f"Stream SID: {stream_sid}")
+                log(f"Call SID: {call_sid}")
                 
                 #use one gemini session for the whole call
                 await run_gemini_call(websocket, stream_sid)
@@ -408,16 +423,16 @@ async def media_stream(websocket: WebSocket):
                 break
 
             elif event == "media":
-                print("Received audio")
+                log("Received audio")
             
             elif event == "mark":
                 mark_name = data["mark"]["name"]
-                print(f"Audio playback completed: {mark_name}")
+                log(f"Audio playback completed: {mark_name}")
 
             elif event == "stop":
-                print("Media stream stopped")
+                log("Media stream stopped")
                 break
 
     # handle cases where Twilio disconnects the WebSocket unexpectedly.
     except WebSocketDisconnect:
-        print("WebSocket disconnected")
+        log("WebSocket disconnected")
