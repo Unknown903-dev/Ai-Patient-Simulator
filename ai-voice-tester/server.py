@@ -6,6 +6,7 @@ import os
 import shutil
 import struct
 import asyncio
+import time
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import parse_qs, parse_qsl, urlencode, urlsplit, urlunsplit
@@ -73,6 +74,160 @@ def merge_call_metadata(call_sid: str, updates: dict) -> Path:
     temporary_path.replace(metadata_path)
 
     return metadata_path
+
+
+class CallTranscript:
+    def __init__(self, call_sid: str, scenario_name: str):
+        # keep transcript details together for one call
+        self.call_sid = call_sid
+        self.scenario_name = scenario_name
+        self.call_directory = get_call_artifact_directory(call_sid)
+        self.started_at = time.monotonic()
+        self.events = []
+        self.buffers = {
+            "OFFICE": "",
+            "PATIENT": "",
+        }
+        self.buffer_started_at = {
+            "OFFICE": None,
+            "PATIENT": None,
+        }
+        self.office_flush_task = None
+
+    def add_fragment(self, speaker: str, text: str) -> None:
+        # join small text parts into one natural sentence
+        fragment = " ".join(text.split())
+
+        # skip empty text parts
+        if not fragment:
+            return
+
+        # remember when this person started talking
+        if self.buffer_started_at[speaker] is None:
+            self.buffer_started_at[speaker] = (
+                time.monotonic() - self.started_at
+            )
+
+        current_text = self.buffers[speaker]
+        no_space_before = ".,!?;:)]}'’"
+
+        # add a space unless this part starts with punctuation
+        if current_text and fragment[0] not in no_space_before:
+            current_text += " "
+
+        self.buffers[speaker] = current_text + fragment
+
+        # give late office text more time before saving the turn
+        if (
+            speaker == "OFFICE"
+            and self.office_flush_task is not None
+            and not self.office_flush_task.done()
+        ):
+            self.schedule_office_flush()
+
+    async def delayed_office_flush(self) -> None:
+        # wait for late office text before saving the turn
+        try:
+            await asyncio.sleep(0.75)
+            self.flush("OFFICE")
+        except asyncio.CancelledError:
+            pass
+        finally:
+            # clear this task only when it is still the newest one
+            if self.office_flush_task is asyncio.current_task():
+                self.office_flush_task = None
+
+    def schedule_office_flush(self) -> None:
+        # restart the wait for the latest office text
+        if (
+            self.office_flush_task is not None
+            and not self.office_flush_task.done()
+        ):
+            self.office_flush_task.cancel()
+
+        self.office_flush_task = asyncio.create_task(
+            self.delayed_office_flush()
+        )
+
+    async def cancel_office_flush(self) -> None:
+        # stop a delayed office flush before the call ends
+        pending_task = self.office_flush_task
+        self.office_flush_task = None
+
+        # do nothing when there is no delayed flush
+        if pending_task is None:
+            return
+
+        # cancel a task that is still waiting
+        if not pending_task.done():
+            pending_task.cancel()
+
+        try:
+            await pending_task
+        except asyncio.CancelledError:
+            pass
+
+    def flush(self, speaker: str) -> None:
+        # save one finished sentence for this person
+        text = self.buffers[speaker].strip()
+
+        # do nothing when there is no text to save
+        if not text:
+            return
+
+        elapsed_seconds = self.buffer_started_at[speaker]
+        self.events.append(
+            {
+                "speaker": speaker,
+                "elapsed_seconds": elapsed_seconds,
+                "text": text,
+            }
+        )
+        self.buffers[speaker] = ""
+        self.buffer_started_at[speaker] = None
+
+    def flush_all(self) -> None:
+        # keep any text left when the call ends
+        self.flush("OFFICE")
+        self.flush("PATIENT")
+
+    def format_timestamp(self, elapsed_seconds: float) -> str:
+        # show time from the start of the call
+        total_milliseconds = round(elapsed_seconds * 1000)
+        minutes, remaining_milliseconds = divmod(
+            total_milliseconds,
+            60000,
+        )
+        seconds, milliseconds = divmod(remaining_milliseconds, 1000)
+        return f"{minutes:02d}:{seconds:02d}.{milliseconds:03d}"
+
+    def save(self) -> Path:
+        # write the whole transcript at the end of the call
+        self.flush_all()
+        transcript_path = self.call_directory / "transcript.txt"
+        temporary_path = transcript_path.with_suffix(".txt.part")
+        lines = [
+            f"Scenario: {self.scenario_name}",
+            f"Call SID: {self.call_sid}",
+            "",
+        ]
+
+        for event in self.events:
+            timestamp = self.format_timestamp(event["elapsed_seconds"])
+            lines.append(
+                f"[{timestamp}] {event['speaker']}: {event['text']}"
+            )
+
+        with temporary_path.open("w", encoding="utf-8") as transcript_file:
+            transcript_file.write("\n".join(lines))
+            transcript_file.write("\n")
+        temporary_path.replace(transcript_path)
+
+        merge_call_metadata(
+            self.call_sid,
+            {"transcript_file": "transcript.txt"},
+        )
+        return transcript_path
 
 
 def optional_integer(value: str):
@@ -298,8 +453,36 @@ def generate_test_tone(
 async def run_gemini_call(
     websocket: WebSocket,
     stream_sid: str,
+    call_sid: str,
+    scenario_name: str,
     scenario: dict,
 ):
+    # keep one transcript from the start to the end of the call
+    transcript = CallTranscript(call_sid, scenario_name)
+
+    try:
+        return await run_gemini_session(
+            websocket,
+            stream_sid,
+            scenario,
+            transcript,
+        )
+    finally:
+        try:
+            await transcript.cancel_office_flush()
+            transcript_path = transcript.save()
+            log(f"transcript saved to {transcript_path}")
+        except Exception as error:
+            log(f"transcript save failed for {call_sid} {error}")
+
+
+async def run_gemini_session(
+    websocket: WebSocket,
+    stream_sid: str,
+    scenario: dict,
+    transcript: CallTranscript,
+):
+    # run the existing live audio session
 
     client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
     model = os.environ["GEMINI_LIVE_MODEL"]
@@ -400,6 +583,7 @@ async def run_gemini_call(
 
                 if text:
                     log(f"PERSON: {text}")
+                    transcript.add_fragment("OFFICE", text)
 
             # print what gemini says
             if server_content.output_transcription:
@@ -412,6 +596,7 @@ async def run_gemini_call(
 
                 if text:
                     log(f"GEMINI: {text}")
+                    transcript.add_fragment("PATIENT", text)
 
             # get audio made by gemini
             if server_content.model_turn:
@@ -643,6 +828,7 @@ async def run_gemini_call(
                         await session.send_realtime_input(
                             activity_end=types.ActivityEnd()
                         )
+                        transcript.schedule_office_flush()
                         activity_active = False
                         silence_ms = 0.0
                         """log(
@@ -668,6 +854,8 @@ async def run_gemini_call(
                         final_goodbye_mark_pending = False
                         log("final goodbye playback completed")
                         log("intentional call end")
+                        await transcript.cancel_office_flush()
+                        transcript.flush("OFFICE")
                         return "intentional_call_end"
 
                 # stop when the phone call ends
@@ -683,6 +871,8 @@ async def run_gemini_call(
                             activity_end=types.ActivityEnd()
                         )
 
+                    await transcript.cancel_office_flush()
+                    transcript.flush("OFFICE")
                     return "twilio_stop"
 
         # send gemini audio back into the phone call
@@ -719,6 +909,7 @@ async def run_gemini_call(
                 # gemini finished one turn
 
                 log(f"Gemini turn {turn_number} complete.")
+                transcript.flush("PATIENT")
 
                 # allow audio from the next gemini turn after an interruption
                 drop_current_gemini_audio = False
@@ -840,6 +1031,8 @@ async def media_stream(websocket: WebSocket):
                 call_end_reason = await run_gemini_call(
                     websocket,
                     stream_sid,
+                    call_sid,
+                    scenario_name,
                     scenario,
                 )
 
