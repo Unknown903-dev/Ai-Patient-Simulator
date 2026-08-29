@@ -212,7 +212,12 @@ class CallTranscript:
             "",
         ]
 
-        for event in self.events:
+        events = sorted(
+            self.events,
+            key=lambda event: event["elapsed_seconds"],
+        )
+
+        for event in events:
             timestamp = self.format_timestamp(event["elapsed_seconds"])
             lines.append(
                 f"[{timestamp}] {event['speaker']}: {event['text']}"
@@ -551,6 +556,90 @@ async def run_gemini_session(
         final_goodbye_mark = "final-goodbye-finished"
         drop_current_gemini_audio = False
         gemini_generation_active = False
+        diagnostic_office_turn = None
+        diagnostic_activity_end_time = None
+        diagnostic_audio_bytes = 0
+        diagnostic_acknowledged = True
+        gemini_stall_task = None
+
+        async def delayed_gemini_stall_log(
+            office_turn: int,
+            audio_bytes: int,
+            activity_end_time: float,
+        ) -> None:
+            # report when gemini stays quiet after an office turn
+            try:
+                await asyncio.sleep(5.0)
+
+                if (
+                    diagnostic_office_turn == office_turn
+                    and not diagnostic_acknowledged
+                ):
+                    seconds_since_activity_end = (
+                        time.monotonic() - activity_end_time
+                    )
+                    log(
+                        f"GEMINI STALL after office turn {office_turn} "
+                        f"audio_sent={audio_bytes} bytes "
+                        f"seconds_since_activity_end="
+                        f"{seconds_since_activity_end:.1f}"
+                    )
+            except asyncio.CancelledError:
+                pass
+
+        def start_gemini_stall_timer() -> None:
+            # start one diagnostic timer for the latest office turn
+            nonlocal gemini_stall_task
+
+            if gemini_stall_task is not None and not gemini_stall_task.done():
+                gemini_stall_task.cancel()
+
+            gemini_stall_task = asyncio.create_task(
+                delayed_gemini_stall_log(
+                    diagnostic_office_turn,
+                    diagnostic_audio_bytes,
+                    diagnostic_activity_end_time,
+                )
+            )
+
+        def acknowledge_gemini_activity() -> None:
+            # acknowledge the latest office turn only once
+            nonlocal diagnostic_acknowledged
+
+            if diagnostic_office_turn is None or diagnostic_acknowledged:
+                return
+
+            diagnostic_acknowledged = True
+            seconds_since_activity_end = (
+                time.monotonic() - diagnostic_activity_end_time
+            )
+
+            if gemini_stall_task is not None and not gemini_stall_task.done():
+                gemini_stall_task.cancel()
+
+            log(
+                f"Gemini acknowledged office turn "
+                f"{diagnostic_office_turn} after "
+                f"{seconds_since_activity_end:.2f} seconds"
+            )
+
+        async def cancel_gemini_stall_timer() -> None:
+            # stop the diagnostic timer when the call ends
+            nonlocal gemini_stall_task
+
+            pending_task = gemini_stall_task
+            gemini_stall_task = None
+
+            if pending_task is None:
+                return
+
+            if not pending_task.done():
+                pending_task.cancel()
+
+            try:
+                await pending_task
+            except asyncio.CancelledError:
+                pass
 
         async def send_to_twilio(message: dict):
             # keep websocket writes in order across both audio tasks
@@ -582,6 +671,7 @@ async def run_gemini_session(
                 )
 
                 if text:
+                    acknowledge_gemini_activity()
                     log(f"PERSON: {text}")
                     transcript.add_fragment("OFFICE", text)
 
@@ -595,6 +685,7 @@ async def run_gemini_session(
                 )
 
                 if text:
+                    acknowledge_gemini_activity()
                     log(f"GEMINI: {text}")
                     transcript.add_fragment("PATIENT", text)
 
@@ -609,6 +700,7 @@ async def run_gemini_session(
                     ):
                         continue
 
+                    acknowledge_gemini_activity()
                     gemini_generation_active = True
 
                     if drop_current_gemini_audio:
@@ -659,6 +751,8 @@ async def run_gemini_session(
             if not response.tool_call:
                 return
 
+            acknowledge_gemini_activity()
+
             function_responses = []
 
             for function_call in response.tool_call.function_calls:
@@ -704,13 +798,23 @@ async def run_gemini_session(
             nonlocal final_goodbye_mark_pending
             nonlocal drop_current_gemini_audio
             nonlocal gemini_generation_active
+            nonlocal diagnostic_office_turn
+            nonlocal diagnostic_activity_end_time
+            nonlocal diagnostic_audio_bytes
+            nonlocal diagnostic_acknowledged
 
             input_resample_state = None
             pcm_buffer = bytearray()
+            pre_roll_buffer = bytearray()
+            pre_roll_size = 3200
 
             # remember if the office is speaking and how long it is quiet
             activity_active = False
             silence_ms = 0.0
+            office_vad_turn = 0
+            silence_checkpoints_logged = set()
+            silence_reset_log_count = 0
+            office_turn_audio_bytes = 0
 
             # phone lines have noise so louder audio counts as speech
             speech_rms_threshold = 500
@@ -718,13 +822,15 @@ async def run_gemini_session(
             # end the turn after this much quiet audio
             end_of_speech_silence_ms = scenario.get(
                 "end_of_speech_silence_ms",
-                600.0,
+                1200.0,
             )
 
             # hold about 100 ms of audio
             gemini_chunk_size = 3200
 
             async def send_buffered_audio(force: bool = False):
+                nonlocal office_turn_audio_bytes
+
                 # send full chunks or send everything when the turn ends
                 while len(pcm_buffer) >= gemini_chunk_size or (
                     force and pcm_buffer
@@ -739,6 +845,7 @@ async def run_gemini_session(
                             mime_type="audio/pcm;rate=16000",
                         )
                     )
+                    office_turn_audio_bytes += len(audio_chunk)
 
             while True:
 
@@ -765,8 +872,39 @@ async def run_gemini_session(
                     )
                     frame_rms = audioop.rms(pcm_8k, 2)
 
+                    # change phone audio from 8 khz to 16 khz
+                    (pcm_16k, input_resample_state) = audioop.ratecv(
+                        pcm_8k,
+                        2,
+                        1,
+                        8000,
+                        16000,
+                        input_resample_state,
+                    )
+
+                    speech_started_this_frame = False
+
+                    # keep only the latest inactive audio for speech start
+                    if not activity_active:
+                        pre_roll_buffer.extend(pcm_16k)
+
+                        if len(pre_roll_buffer) > pre_roll_size:
+                            del pre_roll_buffer[:-pre_roll_size]
+
                     # tell gemini when the office starts speaking
                     if frame_rms >= speech_rms_threshold:
+                        if (
+                            activity_active
+                            and silence_ms >= 200.0
+                            and silence_reset_log_count < 3
+                        ):
+                            log(
+                                f"VAD office turn {office_vad_turn} "
+                                f"silence reset at {silence_ms:.0f} ms "
+                                f"RMS={frame_rms}"
+                            )
+                            silence_reset_log_count += 1
+
                         silence_ms = 0.0
 
                         if not activity_active:
@@ -774,7 +912,20 @@ async def run_gemini_session(
                                 activity_start=types.ActivityStart()
                             )
                             activity_active = True
-                            #log(f"VAD speech started (RMS={frame_rms})")
+                            speech_started_this_frame = True
+                            office_turn_audio_bytes = 0
+                            office_vad_turn += 1
+                            silence_checkpoints_logged.clear()
+                            silence_reset_log_count = 0
+                            log(
+                                f"VAD office turn {office_vad_turn} "
+                                f"started RMS={frame_rms}"
+                            )
+
+                            # send the pre roll including the speech start once
+                            pcm_buffer.extend(pre_roll_buffer)
+                            await send_buffered_audio(force=True)
+                            pre_roll_buffer.clear()
 
                             if finalizing_call or final_goodbye_mark_pending:
                                 finalizing_call = False
@@ -803,21 +954,25 @@ async def run_gemini_session(
                     elif activity_active:
                         silence_ms += frame_duration_ms
 
-                    # change phone audio from 8 khz to 16 khz
+                        for checkpoint_ms in (200.0, 400.0, 700.0):
+                            if (
+                                silence_ms >= checkpoint_ms
+                                and checkpoint_ms
+                                not in silence_checkpoints_logged
+                            ):
+                                log(
+                                    f"VAD office turn {office_vad_turn} "
+                                    f"silence reached "
+                                    f"{checkpoint_ms:.0f} ms"
+                                )
+                                silence_checkpoints_logged.add(
+                                    checkpoint_ms
+                                )
 
-                    (pcm_16k, input_resample_state) = audioop.ratecv(
-                        pcm_8k,
-                        2,
-                        1,
-                        8000,
-                        16000,
-                        input_resample_state,
-                    )
-
-                    pcm_buffer.extend(pcm_16k)
-
-                    # send audio to gemini when enough is ready
-                    await send_buffered_audio()
+                    # send only audio inside a manual activity
+                    if activity_active and not speech_started_this_frame:
+                        pcm_buffer.extend(pcm_16k)
+                        await send_buffered_audio()
 
                     if (
                         activity_active
@@ -825,16 +980,24 @@ async def run_gemini_session(
                     ):
                         # send all speech before telling gemini the turn is done
                         await send_buffered_audio(force=True)
+                        diagnostic_office_turn = office_vad_turn
+                        diagnostic_activity_end_time = time.monotonic()
+                        diagnostic_audio_bytes = office_turn_audio_bytes
+                        diagnostic_acknowledged = False
                         await session.send_realtime_input(
                             activity_end=types.ActivityEnd()
                         )
+                        log(
+                            f"VAD office turn {office_vad_turn} ended after "
+                            f"{end_of_speech_silence_ms:.0f} ms silence "
+                            f"audio_sent={office_turn_audio_bytes} bytes"
+                        )
+                        if not diagnostic_acknowledged:
+                            start_gemini_stall_timer()
                         transcript.schedule_office_flush()
                         activity_active = False
                         silence_ms = 0.0
-                        """log(
-                            f"VAD speech ended after "
-                            f"{end_of_speech_silence_ms:.0f} ms silence"
-                        )"""
+                        pcm_buffer.clear()
 
                 # get a message when twilio finishes playing audio
                 elif event == "mark":
@@ -854,6 +1017,7 @@ async def run_gemini_session(
                         final_goodbye_mark_pending = False
                         log("final goodbye playback completed")
                         log("intentional call end")
+                        await cancel_gemini_stall_timer()
                         await transcript.cancel_office_flush()
                         transcript.flush("OFFICE")
                         return "intentional_call_end"
@@ -867,11 +1031,18 @@ async def run_gemini_session(
                     await send_buffered_audio(force=True)
 
                     if activity_active:
+                        log(
+                            f"VAD office turn {office_vad_turn} was still "
+                            f"active when twilio stopped "
+                            f"silence={silence_ms:.0f} ms "
+                            f"audio_sent={office_turn_audio_bytes} bytes"
+                        )
                         await session.send_realtime_input(
                             activity_end=types.ActivityEnd()
                         )
 
                     await transcript.cancel_office_flush()
+                    await cancel_gemini_stall_timer()
                     transcript.flush("OFFICE")
                     return "twilio_stop"
 
@@ -908,6 +1079,7 @@ async def run_gemini_session(
 
                 # gemini finished one turn
 
+                acknowledge_gemini_activity()
                 log(f"Gemini turn {turn_number} complete.")
                 transcript.flush("PATIENT")
 
@@ -946,38 +1118,41 @@ async def run_gemini_session(
 
         log("TWO-WAY GEMINI CALL IS LIVE")
 
-        # wait for twilio to stop or for an unrecoverable gemini error
-        done, pending = await asyncio.wait(
-            [phone_task, gemini_task,],
-            return_when=asyncio.FIRST_COMPLETED,
-        )
-
-        # stop the other direction after the call has reached an end state
-        for task in pending:
-            task.cancel()
-
-        # wait for stopped tasks to finish
-        for task in pending:
-            try:
-                await task
-
-            except asyncio.CancelledError:
-                pass
-
-        # show any error that happened
         call_end_reason = None
 
-        for task in done:
-            if task.cancelled():
-                continue
+        try:
+            # wait for twilio to stop or for an unrecoverable gemini error
+            done, pending = await asyncio.wait(
+                [phone_task, gemini_task,],
+                return_when=asyncio.FIRST_COMPLETED,
+            )
 
-            exception = task.exception()
+            # stop the other direction after the call has reached an end state
+            for task in pending:
+                task.cancel()
 
-            if exception:
-                raise exception
+            # wait for stopped tasks to finish
+            for task in pending:
+                try:
+                    await task
 
-            if task is phone_task:
-                call_end_reason = task.result()
+                except asyncio.CancelledError:
+                    pass
+
+            # show any error that happened
+            for task in done:
+                if task.cancelled():
+                    continue
+
+                exception = task.exception()
+
+                if exception:
+                    raise exception
+
+                if task is phone_task:
+                    call_end_reason = task.result()
+        finally:
+            await cancel_gemini_stall_timer()
 
     log("Gemini phone session closed.")
     return call_end_reason
