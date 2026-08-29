@@ -4,10 +4,12 @@ import json
 import math
 import os
 import struct
+import asyncio
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from google import genai
+from google.genai import types
 
 load_dotenv()
 
@@ -146,6 +148,180 @@ async def send_gemini_opening(websocket: WebSocket, stream_sid: str):
 
     print("Finished sending Gemini opening line")
 
+async def transcribe_caller_audio(websocket: WebSocket):
+    """
+    Receive caller audio from Twilio, convert it from
+    8 kHz G.711 mu-law into 16 kHz PCM, send it to
+    Gemini Live, and print Gemini's transcription
+    NOT sent back to the phone yet.
+    """
+
+    # Create a Gemini client using the API key in .env.
+    client = genai.Client(
+        api_key=os.environ["GEMINI_API_KEY"]
+    )
+
+    model = os.environ["GEMINI_LIVE_MODEL"]
+
+    # ask gemini to transcribe incoming caller audio
+    config = {
+        "response_modalities": ["AUDIO"],
+        "input_audio_transcription": {},
+    }
+
+    # audioop.ratecv keeps state between audio chunks
+    resample_state = None
+
+    # Buffer converted PCM so we send Gemini about
+    # 100 ms of audio at a time
+    pcm_buffer = bytearray()
+
+    # 16,000 samples/sec × 2 bytes/sample × 0.1 sec
+    gemini_chunk_size = 3200
+
+    print("Connecting caller audio to Gemini Live...")
+
+    async with client.aio.live.connect(
+        model=model,
+        config=config,
+    ) as session:
+
+        print("Caller transcription session connected.")
+
+        # gemini responses need to be read at the same
+        # time that twilio audio is being sent
+        async def receive_transcriptions():
+
+            try:
+
+                # session.receive() finishes after a model turn
+                # so restart it to support continued speech
+                while True:
+
+                    async for response in session.receive():
+
+                        server_content = response.server_content
+
+                        if not server_content:
+                            continue
+
+                        # geminis transcription of the caller
+                        if server_content.input_transcription:
+
+                            text = (
+                                server_content
+                                .input_transcription
+                                .text
+                            )
+
+                            if text:
+                                print(f"Caller said: {text}", 
+                                flush=True)
+
+            except asyncio.CancelledError:
+                pass
+
+        # run geminis receive side in the background
+        receive_task = asyncio.create_task(receive_transcriptions())
+
+        try:
+
+            # continue receiving twilio WebSocket events until call ends
+            while True:
+
+                message = await websocket.receive_text()
+
+                data = json.loads(message)
+
+                event = data.get("event")
+
+                # twilio sends caller audio in media events.
+                if event == "media":
+
+                    payload = data["media"]["payload"]
+
+                    # decode twilios Base64 audio payload
+                    mulaw_8k = base64.b64decode(
+                        payload
+                    )
+
+                    # convert G.711 mu-law into signed
+                    # 16-bit linear PCM at 8 kHz
+                    pcm_8k = audioop.ulaw2lin(
+                        mulaw_8k,
+                        2,
+                    )
+
+                    # resample the caller from twilio
+                    # 8 kHz audio to gemini's 16 kHz input
+                    pcm_16k, resample_state = audioop.ratecv(
+                        pcm_8k,
+                        2,      # 16-bit samples
+                        1,      # mono
+                        8000,   # Twilio sample rate
+                        16000,  # Gemini input sample rate
+                        resample_state,
+                    )
+
+                    # add the converted audio to our buffer
+                    pcm_buffer.extend(pcm_16k)
+
+                    # send gemini approximately 100 ms chunks of PCM audio
+                    while len(pcm_buffer) >= gemini_chunk_size:
+
+                        audio_chunk = bytes(pcm_buffer[:gemini_chunk_size])
+
+                        del pcm_buffer[:gemini_chunk_size]
+
+                        await session.send_realtime_input(
+                            audio=types.Blob(
+                                data=audio_chunk,
+                                mime_type="audio/pcm;rate=16000",
+                            )
+                        )
+
+                # twilio sends our mark back when previously queued audio has finished playing.
+                elif event == "mark":
+
+                    mark_name = data["mark"]["name"]
+
+                    print(
+                        f"Audio playback completed: {mark_name}"
+                    )
+
+                # twilio sends stop when the phone stream ends
+                elif event == "stop":
+
+                    print("Media stream stopped")
+
+                    # send any final audio that did not fill an entire 100 ms chunk
+                    if pcm_buffer:
+
+                        await session.send_realtime_input(
+                            audio=types.Blob(
+                                data=bytes(pcm_buffer),
+                                mime_type="audio/pcm;rate=16000",
+                            )
+                        )
+
+                    # tell gemini no more caller audio is coming
+                    await session.send_realtime_input(audio_stream_end=True)
+
+                    break
+
+        finally:
+
+            # stop gemini's background receive loop
+            receive_task.cancel()
+
+            try:
+                await receive_task
+
+            except asyncio.CancelledError:
+                pass
+
+    print("Caller transcription session closed.")
+
 @app.websocket("/media-stream")
 async def media_stream(websocket: WebSocket):
     """this will be our websocket connection it will stay open while call is active"""
@@ -193,6 +369,10 @@ async def media_stream(websocket: WebSocket):
                 )
 
                 print("Sent Gemini opening audio")
+
+                # now listen to the caller and send their voice to gemini
+                await transcribe_caller_audio(websocket)
+                break
 
             elif event == "media":
                 print("Received audio")
