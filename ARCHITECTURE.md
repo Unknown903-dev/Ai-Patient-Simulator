@@ -1,25 +1,5 @@
-### Twilio
-
-Twilio was selected as the telephony provider after comparing Twilio,
-Plivo, Telnyx, and SignalWire.
-
-The main reason for selecting Twilio was integration risk rather than
-the lowest per minute cost. Twilio provides mature Python support,
-outbound PSTN calling, bidirectional Media Streams, call recording,
-and extensive documentation. For more info visit Discusisons.
-
-### Development Strategy
-
-The first milestone was intentionally limited to verifying that Python
-could successfully originate a call through Twilio before introducing
-streaming audio or AI components.
-
 # Architecture
 
-Twilio is used as the telephony layer because it provides outbound PSTN calling, bidirectional Media Streams, call recording support, and mature Python tooling. The application uses FastAPI to host a WebSocket endpoint that receives live telephone audio from Twilio and can send audio back into the active call. During local development, Cloudflare Tunnel exposes the local WebSocket server through a secure public `wss://` endpoint, avoiding the need to deploy permanent infrastructure while the voice system is still being developed.
+The system uses Twilio for outbound PSTN calling and bidirectional Media Streams, FastAPI for the WebSocket audio bridge, and Gemini Live as the realtime patient model. Twilio sends 8 kHz G.711 μ-law telephone audio to the Python service, which decodes it to PCM and resamples it to 16 kHz before streaming it into a single Gemini Live session that remains active for the entire call. Gemini returns 24 kHz PCM speech, which is resampled to 8 kHz, encoded back to μ-law, and streamed through Twilio to the office agent. During local development, Cloudflare Tunnel exposes the FastAPI WebSocket endpoint through a secure public `wss://` URL without requiring permanent infrastructure. Patient behavior is kept separate from the realtime audio pipeline through reusable scenarios containing the patient's identity, facts, preferences, goal, and behavioral constraints. This allows the same voice infrastructure to test scheduling, rescheduling, medication refills, office questions, identity mismatches, interruptions, and adversarial prompt-injection cases.
 
-The system is being built incrementally so that each layer can be validated
-independently. The first milestone verified outbound PSTN calling. The second
-verified both directions of the realtime audio path: phone audio can reach the
-Python application, and Python-generated G.711 μ-law audio can be played back
-through Twilio. This isolates telephony and networking issues before introducing the realtime AI patient model, making later debugging easier and reducing integration risk.
+The main engineering challenge was reliable conversational turn-taking over continuous telephone audio. Gemini's automatic voice activity detection intermittently merged office prompts or waited too long before responding, so the final design disables automatic activity detection and performs local RMS-based endpointing, explicitly sending `ActivityStart` and `ActivityEnd` events. This gives the application deterministic control over when the office has finished speaking. Twilio playback marks track when generated speech has actually finished playing, while `clear` removes buffered Gemini audio when the office interrupts the patient. Scenario completion is signaled through a structured `finish_call` tool so Gemini can give a natural closing response before the connection ends. Before settling on this design, I tested Gemini automatic VAD, more aggressive endpointing, hybrid local/Gemini VAD, silence-forwarding changes, hysteresis and pre-roll, response watchdogs, and different endpoint thresholds. Manual activity boundaries produced the most reliable multi-turn behavior while keeping the implementation small enough to understand and debug.
