@@ -601,8 +601,8 @@ async def media_stream(websocket: WebSocket):
                 )
                 scenario = get_scenario(scenario_name)
 
-                log(f"Stream SID: {stream_sid}")
-                log(f"Call SID: {call_sid}")
+                #log(f"Stream SID: {stream_sid}")
+                #log(f"Call SID: {call_sid}")
                 log(f"scenario selected {scenario_name}")
                 
                 #use one gemini session for the whole call

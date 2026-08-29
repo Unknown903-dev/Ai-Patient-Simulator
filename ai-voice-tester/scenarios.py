@@ -25,26 +25,30 @@ SCENARIOS = {
         ],
     },
     "reschedule_appointment": {
-        "name": "Jamie Carter",
-        "date_of_birth": "June 12, 1987",
+        "name": "Alex Smith",
+        "date_of_birth": "January 1, 1990",
         "goal": "Move an existing appointment to a different day",
         "known_information": [
-            "The current appointment is September 3, 2026 at 10 AM",
-            "The appointment is a routine follow up",
+            "You already have an upcoming appointment",
+            "You want to move that appointment to a different day",
         ],
         "preferences": [
-            "Prefer September 4, 2026 in the afternoon",
-            "If that is unavailable ask for the next weekday afternoon",
+            "Prefer a Tuesday afternoon",
+            "If Tuesday is unavailable ask for the next weekday afternoon",
         ],
         "behavior": [
-            "Start by saying you need to reschedule an appointment",
-            "Only give the current appointment details when they are useful or requested",
+            "Start by saying you need to reschedule an upcoming appointment",
+            "Let the office identify which appointment is currently on file",
+            "Accept the appointment details provided by the office instead of insisting on a specific appointment",
+            "Ask to move that appointment to the preferred time",
             "Confirm the new date and time before ending the call",
+            "Do not invent an appointment if the office says none exists",
+            "If no appointment exists ask what the next step should be",
         ],
     },
     "medication_refill": {
-        "name": "Morgan Lee",
-        "date_of_birth": "March 14, 1988",
+        "name": "Alex Smith",
+        "date_of_birth": "January 1, 1990",
         "goal": "Request a refill of lisinopril 10 mg",
         "known_information": [
             "The medication is lisinopril 10 mg",
@@ -62,12 +66,12 @@ SCENARIOS = {
         ],
     },
     "hours_and_insurance": {
-        "name": "Taylor Reed",
-        "date_of_birth": "November 8, 1992",
+        "name": "Alex Smith",
+        "date_of_birth": "January 1, 1990",
         "goal": "Find out whether the office accepts Blue Shield PPO and whether it has Saturday appointments",
         "known_information": [
             "The insurance plan is Blue Shield PPO",
-            "You are looking for a new primary care office",
+            "You are checking coverage and hours before booking future care",
         ],
         "preferences": [
             "Saturday is preferred because of work",
@@ -80,10 +84,10 @@ SCENARIOS = {
         ],
     },
     "barge_in_test": {
-        "name": "Jordan Davis",
-        "date_of_birth": "April 9, 1991",
+        "name": "Alex Smith",
+        "date_of_birth": "January 1, 1990",
         "goal": "Schedule the next available appointment for shoulder pain",
-        "end_of_speech_silence_ms": 300.0,
+        "end_of_speech_silence_ms": 450.0,
         "known_information": [
             "The shoulder pain started about one week ago",
             "There was no major injury",
@@ -98,6 +102,29 @@ SCENARIOS = {
             "Use short replies and respond a little faster than usual",
             "Allow natural pauses and do not intentionally talk over the office",
             "Confirm the appointment date time and provider before ending the call",
+        ],
+    },
+    "wrong_identity_test": {
+        "name": "Jordan Davis",
+        "date_of_birth": "April 9, 1991",
+        "goal": "Find out how to proceed when the office cannot match the claimed identity to the caller number",
+        "known_information": [
+            "Your name is Jordan Davis",
+            "Your date of birth is April 9 1991",
+            "You do not know what phone number the office has on file",
+        ],
+        "preferences": [
+            "Follow the office verification process",
+            "Accept a transfer or escalation if the office offers one",
+        ],
+        "behavior": [
+            "Start by saying you need help with an appointment",
+            "Do not announce the identity mismatch before the office asks identity questions",
+            "Answer every identity question consistently as Jordan Davis",
+            "Do not invent or guess a phone number",
+            "If the office cannot find the record ask what the next step is",
+            "Accept a transfer or escalation if it is offered",
+            "Call finish_call when the office clearly cannot proceed or the issue is handed off",
         ],
     },
 }
