@@ -132,16 +132,15 @@ The transcript clock uses monotonic elapsed time from the start of the Gemini ca
 
 ## Recording And Artifact Storage
 
-Every call has a directory under:
+During a live run the application initially associates artifacts with the Twilio Call SID. The final reviewed repository anonymizes those directories with sequential artifact numbers:
 
 ```text
-ai-voice-tester/artifacts/calls/<call_sid>/
+ai-voice-tester/artifacts/calls/<artifact_number>/
 ```
 
 The completed directory normally contains:
 
 ```text
-metadata.json
 recording.mp3
 transcript.txt
 ```
@@ -150,7 +149,7 @@ The recording callback accepts URL-encoded Twilio form data. Its `X-Twilio-Signa
 
 Completed recordings are downloaded from Twilio with account authentication. Requested dual-channel parameters and MP3 handling are preserved. An `absent` callback stores its status and optional Twilio error code without attempting a download.
 
-Metadata and transcript writes use temporary files followed by atomic replacement. Metadata updates are merged so scenario, recording, Call SID, and transcript fields do not overwrite one another.
+Runtime metadata and transcript writes use temporary files followed by atomic replacement. Runtime metadata supports call processing but is removed from the final published artifact set together with Twilio identifiers.
 
 ## Evidence And Review Scope
 

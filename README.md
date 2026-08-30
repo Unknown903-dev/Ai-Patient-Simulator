@@ -309,25 +309,24 @@ The terminal will print the Twilio Call SID and the server will log the realtime
 
 Twilio records each assessment call in dual-channel mode. The recording callback is validated with the Twilio request signature before metadata is processed or media is downloaded.
 
-Each call is stored under its Twilio Call SID:
+The final reviewed calls are stored under sequential artifact numbers:
 
 ```text
 ai-voice-tester/
 └── artifacts/
     └── calls/
-        └── CA.../
-            ├── metadata.json
+        └── 1/
             ├── recording.mp3
             └── transcript.txt
 ```
 
-`metadata.json` associates the Call SID with the selected scenario and recording details. Updates use atomic replacement so recording and transcript fields are merged without discarding earlier metadata.
+The published artifact folders are anonymized and do not include runtime metadata or Twilio identifiers.
 
 `transcript.txt` is built from Gemini Live input and output audio transcription events. Streaming fragments are buffered into complete `OFFICE` and `PATIENT` turns and written with monotonic elapsed timestamps:
 
 ```text
 Scenario: schedule_knee_pain
-Call SID: CA...
+Artifact: 1
 
 [00:12.430] OFFICE: Thanks for calling Pivot Point Orthopedics
 [00:14.902] PATIENT: Hi I'd like to schedule an appointment
@@ -427,7 +426,6 @@ The repository currently includes:
 * setup instructions
 * architecture documentation
 * per-call transcripts and matching MP3 recordings
-* per-call metadata linked by Twilio Call SID
 * [confirmed bug findings](./ai-voice-tester/bug.md) with evidence references
 
 ## Safety
