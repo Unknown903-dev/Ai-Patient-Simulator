@@ -1,0 +1,17 @@
+Scenario: provider_name_consistency_test
+Call SID: CAeff72318c102e8465eefe84d22e55e31
+
+[00:13.115] OFFICE: This call may be recorded for quality and training purposes. para español oprima el dos. Thanks for calling Pivot Point Orthopedics, part of Pretty Good AI. How may I help you today?
+[00:13.682] PATIENT: Hi, I was wondering which providers my upcoming appointments are with.
+[00:25.180] OFFICE: I see you're calling from the number we have on file. Must be speaking with Alex.
+[00:25.794] PATIENT: Yes, this is Alex.
+[00:31.258] OFFICE: Please provide your date of birth.
+[00:32.326] PATIENT: January 1, 1990.
+[00:53.586] OFFICE: Alex, your upcoming appointments are both on Monday, August thirty-first. At eight A.M. you have an appointment with Dr. Z. Bignew Lukowski. Then at nine A.M. you have an appointment with Dr. Abricker. Would you like details about either appointment?
+[00:54.342] PATIENT: Okay, thank you. And could you spell out those last names for me?
+[01:10.354] OFFICE: Sure. The first provider is Dr. Zimanu Lukowski. The second provider is Dr. A Bricker. Would you like me to send these details to your phone as a text message?
+[01:10.920] PATIENT: I'd prefer to get'em spelled out for now, please.
+[01:26.886] OFFICE: Of course. Lukowski is spelled l u k a w s. A bricker is spelled a b r i c k. Let me know if you need anything else.
+[01:27.431] PATIENT: Okay, so that means my appointments are with doctors Zbigniew Lukwowski, spelled L U K A W S, and Abricker, spelled A B R I C K. Is that correct?
+[01:57.010] OFFICE: almost. The first provider is Dr. Zig New Lukowski, spelled L U K. The second is Dr. Abraker, spelled A B R I C K. Let me know if you need anything else about your appointments.
+[01:58.045] PATIENT: Thank you. Have a good day.

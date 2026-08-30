@@ -1,0 +1,11 @@
+Scenario: failed_verification_metadata_test
+Call SID: CA1e0fa8a728e8f0bf7deb68946c1e86d0
+
+[00:12.727] OFFICE: This call may be recorded for quality and training purposes. Para español oprima el dos. Thanks for calling Pivot Point Orthopedics, part of Pretty Good AI. How may I help you today?
+[00:13.202] PATIENT: Hi, I was wondering if I have any upcoming appointments?
+[00:24.496] OFFICE: I see you're calling from the number we have on file. Am I speaking with Alex?
+[00:25.209] PATIENT: Yes, this is Alex Smith.
+[00:30.847] OFFICE: Please provide your date of birth.
+[00:31.420] PATIENT: January 2, 1990.
+[00:57.946] OFFICE: Alex, you have two upcoming appointments. The first is on Monday, August 31st at 8:00 a.m. with Dr. Zigmunt Lukowski. The second is also on Monday, August 31st at 9:00 a.m. with Dr. Apriker. Would you like details about either appointment?
+[00:59.146] PATIENT: Thank you, have a good day.

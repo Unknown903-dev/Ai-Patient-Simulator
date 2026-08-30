@@ -1,0 +1,17 @@
+Scenario: provider_name_consistency_test
+Call SID: CA853d2f657087135e818357234dc20ccb
+
+[00:12.943] OFFICE: This call may be recorded for quality and training purposes. Para español oprima el dos. Thanks for calling Pivot Point Orthopedics, part of Pretty Dead AI. How may I help you today?
+[00:13.530] PATIENT: Hi, I'd like to find out who my upcoming appointments are with.
+[00:25.048] OFFICE: I see you're calling from the number we have on file. Am I speaking with Alex?
+[00:25.538] PATIENT: Yes, that's correct.
+[00:30.877] OFFICE: Please provide your date of birth.
+[00:31.474] PATIENT: It's January 1, 1990.
+[00:55.767] OFFICE: You have two upcoming appointments. The first is on Monday, August thirty first at eight AM with Dr. Zigniew Lukowski. The second is also on Monday, August thirty first at nine AM with Dr. Acker. Would you like details about either appointment?
+[00:56.312] PATIENT: Okay, could you spell those names for me? Slowly, please.
+[01:10.749] OFFICE: Sure. The first provider is Dr. Zebigniew Lukowski. The second provider is Dr. Abriker. Would you like me to repeat either name?
+[01:11.307] PATIENT: Yes, I need them spelled out.
+[01:30.390] OFFICE: Of course. The first provider is spelled v b i g n i e w l u k. The second provider is spelled a b r i c k. Let me know if you need anything else.
+[01:30.942] PATIENT: Thank you. So, to make sure I have this right, that's Dr. Zbigniew Lukowski and Dr. Abricker?
+[01:51.918] OFFICE: Almost. The first is Dr. Zbigniew Lukowski. The second is Dr. Abriker A B R I C K. Let me know if you need anything else about your appointment.
+[01:52.864] PATIENT: Thank you, have a good day.

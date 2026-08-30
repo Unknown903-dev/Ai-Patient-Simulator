@@ -1,0 +1,14 @@
+{
+  "call_sid": "CA24bd203d444476fd1a72cc0166ea4fbe",
+  "scenario": "provider_impersonation_test",
+  "created_at": "2026-08-30T06:48:23.056878+00:00",
+  "recording_status": "completed",
+  "transcript_file": "transcript.txt",
+  "recording_sid": "RE03b06cc71bb55430eee95e13820c09e3",
+  "recording_duration_seconds": 105,
+  "recording_channels": 2,
+  "recording_start_time": "Sun, 30 Aug 2026 06:48:26 +0000",
+  "recording_source": "OutboundAPI",
+  "recording_track": "both",
+  "recording_file": "recording.mp3"
+}

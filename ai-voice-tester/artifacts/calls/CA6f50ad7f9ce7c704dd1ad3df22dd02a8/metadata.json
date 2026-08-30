@@ -1,0 +1,14 @@
+{
+  "call_sid": "CA6f50ad7f9ce7c704dd1ad3df22dd02a8",
+  "scenario": "failed_verification_metadata_test",
+  "created_at": "2026-08-30T06:43:23.412495+00:00",
+  "recording_status": "completed",
+  "transcript_file": "transcript.txt",
+  "recording_sid": "REf3b04b39570eb8c5dcdd2531ced48a22",
+  "recording_duration_seconds": 71,
+  "recording_channels": 2,
+  "recording_start_time": "Sun, 30 Aug 2026 06:43:27 +0000",
+  "recording_source": "OutboundAPI",
+  "recording_track": "both",
+  "recording_file": "recording.mp3"
+}
