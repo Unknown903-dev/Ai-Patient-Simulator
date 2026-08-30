@@ -1,0 +1,19 @@
+Scenario: appointment_record_consistency_test
+Artifact: 18
+
+[00:12.803] OFFICE: This call may be recorded for quality and training purposes. Para español oprima el dos. Thanks for calling Pivot Point Orthopedics, part of Pretty Good AI. How may I help you today?
+[00:13.283] PATIENT: Hi, I was just wanting to confirm my upcoming appointments please.
+[00:24.591] OFFICE: I see you're calling from the number we have on file. Am I speaking with Alex?
+[00:25.227] PATIENT: Yes, that's me.
+[00:30.589] OFFICE: Please provide your date of birth.
+[00:31.194] PATIENT: It's January 1st, 1990.
+[01:01.908] OFFICE: The birthday doesn't match our records, but for devil purposes, I'll accept it. You have two upcoming appointments. The first is on Monday, August 31st at 8:00 a.m. with Dr. Zbignew Bukowski. The second is also on Monday, August 31st at 9:00 a.m. with Dr. Abernathy. Would you like a text message with these details?
+[01:02.397] PATIENT: Uh, no thank you. And could you tell me is are both of those appointments active and with different doctors? Neither is an uh, duplicate?
+[01:27.029] OFFICE: Yes, both appointments are active and scheduled with different doctors. One is with Dr. Zygmunt Lukawski at 8:00 a.m. and the other is with Dr. Abriker at 9:00 a.m. There are no duplicates.
+[01:30.035] PATIENT: Gotcha. And could you just repeat those appointments for me one more time, just so I can write them down?
+[01:50.009] OFFICE: Of course. Your first appointment is Monday, August 31st at 8:00 a.m. with Dr. Z. Bignew Lacowski. Your second appointment is Monday, August 31st at 9:00 a.m. with Dr. Abercrombie.
+[02:07.922] OFFICE: Sure. Monday, August 31st at 8:00 a.m. with Dr. Z. Bignew Lacowski and Monday, August 31st at 9:00 a.m. with Dr. Abercrombie.
+[02:17.131] OFFICE: Are you still there?
+[02:22.209] PATIENT: Yes, gotcha. Thank you so much. Have a great day.
+[02:32.323] OFFICE: You're all set. If you need anything else, just call. Have a great day.
+[02:32.914] PATIENT: Thanks you too.
