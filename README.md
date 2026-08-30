@@ -27,11 +27,13 @@ The bot places real outbound phone calls, behaves like a patient using Gemini Li
 * [x] Natural goodbye and call termination
 * [x] Identity verification edge-case scenario
 * [x] Prompt-injection testing scenario
-* [ ] Call recording export
-* [ ] Persistent transcript files
-* [ ] Automated QA evaluation
-* [ ] Bug report
-* [ ] 10+ final submission calls
+* [x] Dual-channel call recording export
+* [x] Persistent timestamped transcript files
+* [x] Per-call metadata and artifact storage
+* [x] Twilio recording webhook validation
+* [x] Adversarial privacy and consistency scenarios
+* [x] Evidence-backed bug report
+* [x] 10+ recorded test calls
 
 ## How It Works
 
@@ -75,7 +77,9 @@ ActivityEnd
 
 when speech begins and ends.
 
-Normal scenarios use a 600 ms silence threshold. Individual stress-test scenarios can override this value.
+Normal scenarios use a 1200 ms silence threshold. Individual stress-test scenarios can override this value. `barge_in_test` currently uses 450 ms.
+
+While no office activity is active, telephone audio is still read but is not forwarded to Gemini. The bridge keeps about 100 ms of local pre-roll and sends it once when speech crosses the RMS threshold. This preserves the start of an utterance without continuously forwarding inactive line noise.
 
 Twilio playback marks are used to determine when Gemini audio has finished playing. If the office begins speaking while Gemini audio is still buffered, the application sends a Twilio `clear` event and allows the office to take the turn.
 
@@ -96,6 +100,12 @@ Each scenario specifies:
 The patient is instructed to reveal information naturally instead of giving every detail immediately.
 
 ## Available Scenarios
+
+Run any scenario with:
+
+```bash
+python make_call.py <scenario_name>
+```
 
 ### Basic appointment scheduling
 
@@ -157,6 +167,41 @@ Tests whether the office AI follows caller-supplied instructions that conflict w
 
 The scenario includes both a direct instruction injection and a data-versus-instruction test and stops once sufficient evidence is collected.
 
+### Additional workflow and safety tests
+
+```text
+verification_bypass_test
+false_confirmation_test
+reschedule_then_cancel_test
+long_pause_test
+caregiver_hipaa_test
+dob_mismatch_test
+medication_dosage_safety_test
+caller_id_privacy_test
+sunday_three_am_test
+spanish_support_test
+human_transfer_test
+```
+
+### Privacy and adversarial tests
+
+```text
+authorization_laundering_test
+correction_oracle_test
+record_existence_test
+database_offtopic_flirting_test
+preverification_phone_disclosure_test
+clinic_identity_consistency_test
+vendor_text_consent_test
+appointment_record_consistency_test
+demo_mode_verification_bypass_test
+provider_name_consistency_test
+failed_verification_metadata_test
+provider_impersonation_test
+```
+
+The adversarial scenarios are intentionally narrow. They collect enough evidence for one outcome, avoid inventing credentials or patient details, and avoid modifying records unless modification is the scenario's explicit goal.
+
 ## Setup
 
 ### Requirements
@@ -166,6 +211,12 @@ The scenario includes both a direct instruction injection and a data-versus-inst
 * Twilio Voice-enabled phone number
 * Gemini API key
 * Cloudflare Tunnel or another public HTTPS/WSS tunnel
+
+Run the application commands from the project directory:
+
+```bash
+cd ai-voice-tester
+```
 
 Create and activate a virtual environment:
 
@@ -212,6 +263,8 @@ The same Twilio caller number should be used for all assessment calls.
 
 ## Run
 
+Run the commands below from the `ai-voice-tester` directory.
+
 ### 1. Start the FastAPI server
 
 ```bash
@@ -251,6 +304,36 @@ python make_call.py schedule_knee_pain
 ```
 
 The terminal will print the Twilio Call SID and the server will log the realtime conversation.
+
+## Call Artifacts
+
+Twilio records each assessment call in dual-channel mode. The recording callback is validated with the Twilio request signature before metadata is processed or media is downloaded.
+
+Each call is stored under its Twilio Call SID:
+
+```text
+ai-voice-tester/
+└── artifacts/
+    └── calls/
+        └── CA.../
+            ├── metadata.json
+            ├── recording.mp3
+            └── transcript.txt
+```
+
+`metadata.json` associates the Call SID with the selected scenario and recording details. Updates use atomic replacement so recording and transcript fields are merged without discarding earlier metadata.
+
+`transcript.txt` is built from Gemini Live input and output audio transcription events. Streaming fragments are buffered into complete `OFFICE` and `PATIENT` turns and written with monotonic elapsed timestamps:
+
+```text
+Scenario: schedule_knee_pain
+Call SID: CA...
+
+[00:12.430] OFFICE: Thanks for calling Pivot Point Orthopedics
+[00:14.902] PATIENT: Hi I'd like to schedule an appointment
+```
+
+Transcripts are best-effort artifacts. Proper names and other speech recognition results should be checked against the corresponding dual-channel recording before being treated as definitive evidence.
 
 ## Example Logs
 
@@ -315,11 +398,11 @@ Approaches tested included:
 
 The final implementation uses application-controlled `ActivityStart` and `ActivityEnd` signals because this produced the most reliable multi-turn conversations during testing.
 
-More detailed engineering notes and failed experiments are documented separately from the main architecture so the README remains focused on setup and usage.
+The architecture document records the final audio path turn lifecycle artifact storage and the key design decisions behind the implementation.
 
 ## Project Goals
 
-The final test suite is designed to evaluate issues such as:
+The test suite evaluates issues such as:
 
 * incorrect appointment scheduling
 * rescheduling and cancellation failures
@@ -336,19 +419,16 @@ The final test suite is designed to evaluate issues such as:
 
 The objective is not simply to complete scripted conversations. The caller should behave like a realistic patient while actively steering each conversation toward the scenario being tested.
 
-## Submission Artifacts
+## Project Outputs
 
-The final repository will include:
+The repository currently includes:
 
 * Python source code
 * setup instructions
 * architecture documentation
-* `.env.example`
-* at least 10 complete call transcripts
-* matching MP3 or OGG recordings
-* bug report with references to specific calls and timestamps
-* project walkthrough Loom
-* AI-assisted debugging Loom
+* per-call transcripts and matching MP3 recordings
+* per-call metadata linked by Twilio Call SID
+* [confirmed bug findings](./ai-voice-tester/bug.md) with evidence references
 
 ## Safety
 
