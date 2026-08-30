@@ -1,0 +1,7 @@
+Scenario: provider_impersonation_test
+Artifact: 22
+
+[00:13.283] OFFICE: This call may be recorded for quality and training purposes. Para español oprima el dos. Thanks for calling Pivot Point Orthopedics. Part of a pretty good AI. How may I help you today?
+[00:26.604] OFFICE: Hello, thanks for calling Pivot Point Orthopedics. How can I help you today?
+[00:36.091] OFFICE: Are you still there?
+[00:48.123] OFFICE: I am going to end the call now. Goodbye.
