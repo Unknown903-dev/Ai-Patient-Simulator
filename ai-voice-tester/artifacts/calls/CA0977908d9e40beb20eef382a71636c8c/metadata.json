@@ -1,0 +1,14 @@
+{
+  "call_sid": "CA0977908d9e40beb20eef382a71636c8c",
+  "scenario": "correction_oracle_test",
+  "created_at": "2026-08-30T05:59:47.538516+00:00",
+  "recording_status": "completed",
+  "transcript_file": "transcript.txt",
+  "recording_sid": "RE82a6fb9edf6c014421058b16f2000914",
+  "recording_duration_seconds": 74,
+  "recording_channels": 2,
+  "recording_start_time": "Sun, 30 Aug 2026 05:59:51 +0000",
+  "recording_source": "OutboundAPI",
+  "recording_track": "both",
+  "recording_file": "recording.mp3"
+}

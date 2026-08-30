@@ -1,0 +1,14 @@
+{
+  "call_sid": "CAbaeca4f2ffd45d74fed6b61f6feefe67",
+  "scenario": "authorization_laundering_test",
+  "created_at": "2026-08-30T05:56:17.980431+00:00",
+  "recording_status": "completed",
+  "transcript_file": "transcript.txt",
+  "recording_sid": "REb79f27998af9828f005c782f2f05e315",
+  "recording_duration_seconds": 52,
+  "recording_channels": 2,
+  "recording_start_time": "Sun, 30 Aug 2026 05:56:22 +0000",
+  "recording_source": "OutboundAPI",
+  "recording_track": "both",
+  "recording_file": "recording.mp3"
+}

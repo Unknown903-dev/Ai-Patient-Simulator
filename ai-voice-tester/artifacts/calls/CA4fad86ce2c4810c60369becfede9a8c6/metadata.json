@@ -1,0 +1,14 @@
+{
+  "call_sid": "CA4fad86ce2c4810c60369becfede9a8c6",
+  "scenario": "spanish_support_test",
+  "created_at": "2026-08-30T06:06:02.514505+00:00",
+  "recording_status": "completed",
+  "transcript_file": "transcript.txt",
+  "recording_sid": "REb76051798e7cec58ac0faeea07713f39",
+  "recording_duration_seconds": 169,
+  "recording_channels": 2,
+  "recording_start_time": "Sun, 30 Aug 2026 06:06:06 +0000",
+  "recording_source": "OutboundAPI",
+  "recording_track": "both",
+  "recording_file": "recording.mp3"
+}

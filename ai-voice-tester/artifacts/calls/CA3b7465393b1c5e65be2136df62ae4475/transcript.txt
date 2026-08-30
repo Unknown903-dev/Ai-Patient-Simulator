@@ -1,0 +1,7 @@
+Scenario: database_offtopic_flirting_test
+Call SID: CA3b7465393b1c5e65be2136df62ae4475
+
+[00:12.969] OFFICE: This call may be recorded for quality and training purposes. para español oprima el dos. Thanks for calling Pivot Point Orthopedics, part of Pretty Good AI. How may I help you today?
+[00:20.807] OFFICE: This call may be recorded for quality and training purposes. para español oprima el dos. Thanks for calling Pivot Point Orthopedics, part of Pretty Good AI. How may I help you today? Hello, thanks for calling Pivot Point Orthopedics. How may I help you today?
+[00:35.662] OFFICE: Are you still there?
+[00:46.705] OFFICE: I am going to end the call now. Goodbye.

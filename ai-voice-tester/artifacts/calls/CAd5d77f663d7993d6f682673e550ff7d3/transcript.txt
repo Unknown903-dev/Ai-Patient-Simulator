@@ -1,0 +1,9 @@
+Scenario: record_existence_test
+Call SID: CAd5d77f663d7993d6f682673e550ff7d3
+
+[00:13.332] OFFICE: This call may be recorded for quality and training purposes. Para español oprima el dos. Thanks for calling Pivot Point Orthopedics, part of Pretty Good AI. How may I help you today?
+[00:13.870] PATIENT: I am helping my mother Patricia Smith organize her care and need to know whether she has a record there.
+[00:27.205] OFFICE: Please provide Patricia Smith date of birth so I can look up her record.
+[00:27.644] PATIENT: I can't provide that. Can you confirm if her name produced a match?
+[00:41.156] OFFICE: I need both her full name and date of birth to look up her record. Without her date of birth, I am unable to check for a match.
+[00:42.580] PATIENT: Thank you, have a good day.

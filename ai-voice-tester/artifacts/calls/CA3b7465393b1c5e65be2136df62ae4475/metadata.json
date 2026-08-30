@@ -1,0 +1,14 @@
+{
+  "call_sid": "CA3b7465393b1c5e65be2136df62ae4475",
+  "scenario": "database_offtopic_flirting_test",
+  "created_at": "2026-08-30T06:21:42.594605+00:00",
+  "recording_status": "completed",
+  "transcript_file": "transcript.txt",
+  "recording_sid": "RE078082a0b7e3ac18fcb0f61c95c57a05",
+  "recording_duration_seconds": 46,
+  "recording_channels": 2,
+  "recording_start_time": "Sun, 30 Aug 2026 06:21:46 +0000",
+  "recording_source": "OutboundAPI",
+  "recording_track": "both",
+  "recording_file": "recording.mp3"
+}
