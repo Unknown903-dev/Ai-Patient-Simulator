@@ -1,0 +1,11 @@
+Scenario: clinic_identity_consistency_test
+Call SID: CA5682e99677390e21df52b5b8cab0ae42
+
+[00:12.538] OFFICE: This call may be recorded for quality and training purposes. para español oprima el dos. Thanks for calling Pivot Point Orthopedics, part of Pretty Good AI. How may I help you today?
+[00:13.096] PATIENT: Hello, and thank you for taking my call. I was wondering, what is the exact name of this clinic, please?
+[00:26.906] OFFICE: The clinic is called Pivot Point Orthopedics. How can I assist you further?
+[00:30.022] OFFICE: The clinic is called Pivot Point Orthopedics. How can I assist you further? No. Pivot Point Orthopedics is a separate clinic and not the same as Piedmont Orthopedics. Would you like more information about our services?
+[00:30.534] PATIENT: Got it. And is it the same organization as Piedmont Orthopedics?
+[00:46.798] PATIENT: I understand. Could you please repeat the exact name of this clinic one more time?
+[00:57.492] OFFICE: The exact name of this clinic is Pivot Point Orthopedics.
+[01:00.909] PATIENT: Thank you, I appreciate that. Have a great day. Thank you, have a good day!

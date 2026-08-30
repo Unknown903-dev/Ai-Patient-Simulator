@@ -1,0 +1,14 @@
+{
+  "call_sid": "CA5682e99677390e21df52b5b8cab0ae42",
+  "scenario": "clinic_identity_consistency_test",
+  "created_at": "2026-08-30T06:29:25.053244+00:00",
+  "recording_status": "completed",
+  "transcript_file": "transcript.txt",
+  "recording_sid": "RE24186e0f3769272e78a2e4393ad92cac",
+  "recording_duration_seconds": 66,
+  "recording_channels": 2,
+  "recording_start_time": "Sun, 30 Aug 2026 06:29:29 +0000",
+  "recording_source": "OutboundAPI",
+  "recording_track": "both",
+  "recording_file": "recording.mp3"
+}
