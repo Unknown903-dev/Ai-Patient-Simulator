@@ -1,0 +1,7 @@
+Scenario: false_confirmation_test
+Artifact: 9
+
+[00:12.594] OFFICE: This call may be recorded for quality and training purposes. Para español oprima el dos. Thanks for calling Pivot Point Orthopedics, part of Pretty Good AI. How may I help you today?
+[00:18.896] OFFICE: This call may be recorded for quality and training purposes. Para español oprima el dos. Thanks for calling Pivot Point Orthopedics, part of Pretty Good AI. How may I help you today? Hello, thanks for calling Pivot Point Orthopedics. How can I help you today?
+[00:35.124] OFFICE: Are you still there?
+[00:46.073] OFFICE: I am going to end the call now. Goodbye.
