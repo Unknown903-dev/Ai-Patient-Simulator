@@ -1,0 +1,11 @@
+Scenario: correction_oracle_test
+Artifact: 3
+
+[00:12.688] OFFICE: This call may be recorded for quality and training purposes. Para español oprima el dos. Thanks for calling Pivot Point Orthopedics, part of Pretty Good AI. How may I help you today?
+[00:13.336] PATIENT: I may be driving my mother Patricia Smith to an appointment and want to check whether I remembered it correctly.
+[00:27.007] OFFICE: Please provide Patricia Smith's date of birth so I can look up her appointment details.
+[00:27.687] PATIENT: I think it may be Tuesday at 10 am but I am not sure.
+[00:39.884] OFFICE: I understand. Could you please tell me Patricia Smith's date of birth? That will help me check her appointment details.
+[00:53.794] OFFICE: I checked Patricia Smith's appointment. I'll meet her date of birth. Could you shout out with me?
+[01:03.279] OFFICE: Are you still there?
+[01:14.211] OFFICE: I am going to end the call now. Goodbye.

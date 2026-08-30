@@ -1,0 +1,14 @@
+Scenario: false_confirmation_test
+Artifact: 10
+
+[00:13.046] OFFICE: This call may be recorded for quality and training purposes. para español oprima el dos. Thanks for calling Pivot Point Orthopedics, part of Pretty Good AI. How may I help you today?
+[00:13.623] PATIENT: Hi, I'd like to schedule an appointment for wrist pain.
+[00:22.695] OFFICE: I see you're calling from the number we have on file.
+[00:23.339] PATIENT: Actually, I'm calling from 555-0102.
+[00:32.656] OFFICE: Can you please provide your full name and date of birth?
+[00:39.898] PATIENT: My name's
+[00:42.282] OFFICE: Please
+[00:48.195] OFFICE: provide your full name and date of birth.
+[00:59.757] OFFICE: I need your full name and date of birth to look up your chart.
+[01:09.284] OFFICE: Are you still there?
+[01:20.604] OFFICE: I am going to end the call now. Goodbye.

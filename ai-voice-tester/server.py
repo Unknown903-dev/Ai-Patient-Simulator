@@ -3,20 +3,37 @@ import base64
 import json
 import math
 import os
+import shutil
 import struct
 import asyncio
+import time
 from datetime import datetime
+from pathlib import Path
+from urllib.parse import parse_qs, parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.request import Request as UrlRequest
+from urllib.request import urlopen
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import (
+    FastAPI,
+    HTTPException,
+    Request,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from google import genai
 from google.genai import types
+from twilio.request_validator import RequestValidator
 
 from scenarios import DEFAULT_SCENARIO, build_system_instruction, get_scenario
 
 load_dotenv()
 
 app = FastAPI()
+CALL_ARTIFACTS_DIR = Path(__file__).resolve().parent / "artifacts" / "calls"
+twilio_request_validator = RequestValidator(
+    os.environ["TWILIO_AUTH_TOKEN"]
+)
 
 
 def log(message: str) -> None:
@@ -25,8 +42,383 @@ def log(message: str) -> None:
     print(f"[{timestamp}] {message}", flush=True)
 
 
+def get_call_artifact_directory(call_sid: str) -> Path:
+    # find the folder for this call and make it when needed
+    # stop unsafe folder names from being used
+    if not call_sid or not call_sid.isalnum():
+        raise ValueError("invalid call sid")
+
+    call_directory = CALL_ARTIFACTS_DIR / call_sid
+    call_directory.mkdir(parents=True, exist_ok=True)
+    return call_directory
+
+
+def merge_call_metadata(call_sid: str, updates: dict) -> Path:
+    # add new details without losing what is already saved
+    call_directory = get_call_artifact_directory(call_sid)
+    metadata_path = call_directory / "metadata.json"
+    metadata = {}
+
+    # load the old details before adding the new ones
+    if metadata_path.exists():
+        with metadata_path.open("r", encoding="utf-8") as metadata_file:
+            metadata = json.load(metadata_file)
+
+    metadata.setdefault("call_sid", call_sid)
+    metadata.update(updates)
+
+    temporary_path = metadata_path.with_suffix(".json.part")
+    with temporary_path.open("w", encoding="utf-8") as metadata_file:
+        json.dump(metadata, metadata_file, indent=2, ensure_ascii=False)
+        metadata_file.write("\n")
+    temporary_path.replace(metadata_path)
+
+    return metadata_path
+
+
+class CallTranscript:
+    def __init__(self, call_sid: str, scenario_name: str):
+        # keep transcript details together for one call
+        self.call_sid = call_sid
+        self.scenario_name = scenario_name
+        self.call_directory = get_call_artifact_directory(call_sid)
+        self.started_at = time.monotonic()
+        self.events = []
+        self.buffers = {
+            "OFFICE": "",
+            "PATIENT": "",
+        }
+        self.buffer_started_at = {
+            "OFFICE": None,
+            "PATIENT": None,
+        }
+        self.office_flush_task = None
+
+    def add_fragment(self, speaker: str, text: str) -> None:
+        # join small text parts into one natural sentence
+        fragment = " ".join(text.split())
+
+        # skip empty text parts
+        if not fragment:
+            return
+
+        # remember when this person started talking
+        if self.buffer_started_at[speaker] is None:
+            self.buffer_started_at[speaker] = (
+                time.monotonic() - self.started_at
+            )
+
+        current_text = self.buffers[speaker]
+        no_space_before = ".,!?;:)]}'’"
+
+        # add a space unless this part starts with punctuation
+        if current_text and fragment[0] not in no_space_before:
+            current_text += " "
+
+        self.buffers[speaker] = current_text + fragment
+
+        # give late office text more time before saving the turn
+        if (
+            speaker == "OFFICE"
+            and self.office_flush_task is not None
+            and not self.office_flush_task.done()
+        ):
+            self.schedule_office_flush()
+
+    async def delayed_office_flush(self) -> None:
+        # wait for late office text before saving the turn
+        try:
+            await asyncio.sleep(0.75)
+            self.flush("OFFICE")
+        except asyncio.CancelledError:
+            pass
+        finally:
+            # clear this task only when it is still the newest one
+            if self.office_flush_task is asyncio.current_task():
+                self.office_flush_task = None
+
+    def schedule_office_flush(self) -> None:
+        # restart the wait for the latest office text
+        if (
+            self.office_flush_task is not None
+            and not self.office_flush_task.done()
+        ):
+            self.office_flush_task.cancel()
+
+        self.office_flush_task = asyncio.create_task(
+            self.delayed_office_flush()
+        )
+
+    async def cancel_office_flush(self) -> None:
+        # stop a delayed office flush before the call ends
+        pending_task = self.office_flush_task
+        self.office_flush_task = None
+
+        # do nothing when there is no delayed flush
+        if pending_task is None:
+            return
+
+        # cancel a task that is still waiting
+        if not pending_task.done():
+            pending_task.cancel()
+
+        try:
+            await pending_task
+        except asyncio.CancelledError:
+            pass
+
+    def flush(self, speaker: str) -> None:
+        # save one finished sentence for this person
+        text = self.buffers[speaker].strip()
+
+        # do nothing when there is no text to save
+        if not text:
+            return
+
+        elapsed_seconds = self.buffer_started_at[speaker]
+        self.events.append(
+            {
+                "speaker": speaker,
+                "elapsed_seconds": elapsed_seconds,
+                "text": text,
+            }
+        )
+        self.buffers[speaker] = ""
+        self.buffer_started_at[speaker] = None
+
+    def flush_all(self) -> None:
+        # keep any text left when the call ends
+        self.flush("OFFICE")
+        self.flush("PATIENT")
+
+    def format_timestamp(self, elapsed_seconds: float) -> str:
+        # show time from the start of the call
+        total_milliseconds = round(elapsed_seconds * 1000)
+        minutes, remaining_milliseconds = divmod(
+            total_milliseconds,
+            60000,
+        )
+        seconds, milliseconds = divmod(remaining_milliseconds, 1000)
+        return f"{minutes:02d}:{seconds:02d}.{milliseconds:03d}"
+
+    def save(self) -> Path:
+        # write the whole transcript at the end of the call
+        self.flush_all()
+        self.call_directory.mkdir(parents=True, exist_ok=True)
+        transcript_path = self.call_directory / "transcript.txt"
+        temporary_path = transcript_path.with_suffix(".txt.part")
+        lines = [
+            f"Scenario: {self.scenario_name}",
+            f"Call SID: {self.call_sid}",
+            "",
+        ]
+
+        events = sorted(
+            self.events,
+            key=lambda event: event["elapsed_seconds"],
+        )
+
+        for event in events:
+            timestamp = self.format_timestamp(event["elapsed_seconds"])
+            lines.append(
+                f"[{timestamp}] {event['speaker']}: {event['text']}"
+            )
+
+        with temporary_path.open("w", encoding="utf-8") as transcript_file:
+            transcript_file.write("\n".join(lines))
+            transcript_file.write("\n")
+        temporary_path.replace(transcript_path)
+
+        merge_call_metadata(
+            self.call_sid,
+            {"transcript_file": "transcript.txt"},
+        )
+        return transcript_path
+
+
+def optional_integer(value: str):
+    # turn number text into a number when possible
+    # leave missing values empty
+    if not value:
+        return None
+
+    try:
+        return int(value)
+    except ValueError:
+        return value
+
+
+def recording_media_url(recording_url: str, channels) -> str:
+    # make a safe twilio mp3 link for the saved recording
+    parsed_url = urlsplit(recording_url)
+    hostname = (parsed_url.hostname or "").lower()
+    account_path = f"/Accounts/{os.environ['TWILIO_ACCOUNT_SID']}/"
+
+    # only send the account login to a matching twilio link
+    if not (
+        parsed_url.scheme == "https"
+        and (
+            hostname == "api.twilio.com"
+            or (
+                hostname.startswith("api.")
+                and hostname.endswith(".twilio.com")
+            )
+        )
+        and parsed_url.username is None
+        and parsed_url.password is None
+        and account_path in parsed_url.path
+    ):
+        raise ValueError("invalid twilio recording url")
+
+    media_path = parsed_url.path
+    # add the mp3 ending when twilio leaves it out
+    if not media_path.lower().endswith(".mp3"):
+        media_path = f"{media_path}.mp3"
+
+    query_values = dict(parse_qsl(parsed_url.query, keep_blank_values=True))
+    # ask twilio to keep both sides in separate channels
+    if channels == 2:
+        query_values["RequestedChannels"] = "2"
+
+    return urlunsplit(
+        (
+            parsed_url.scheme,
+            parsed_url.netloc,
+            media_path,
+            urlencode(query_values),
+            parsed_url.fragment,
+        )
+    )
+
+
+def download_recording(recording_url: str, destination: Path) -> None:
+    # download the recording with the twilio account login
+    credentials = base64.b64encode(
+        (
+            f"{os.environ['TWILIO_ACCOUNT_SID']}:"
+            f"{os.environ['TWILIO_AUTH_TOKEN']}"
+        ).encode("utf-8")
+    ).decode("ascii")
+    download_request = UrlRequest(
+        recording_url,
+        headers={"Authorization": f"Basic {credentials}"},
+    )
+    temporary_path = destination.with_suffix(".mp3.part")
+
+    try:
+        with urlopen(download_request, timeout=60) as response:
+            with temporary_path.open("wb") as recording_file:
+                shutil.copyfileobj(response, recording_file)
+        temporary_path.replace(destination)
+    except Exception:
+        temporary_path.unlink(missing_ok=True)
+        raise
+
+
 @app.get("/")
 async def health_check():
+    return {"status": "ok"}
+
+
+@app.post("/recording-status")
+async def recording_status(request: Request):
+    # handle recording updates sent by twilio
+    body = await request.body()
+    form_values = parse_qs(
+        body.decode("utf-8"),
+        keep_blank_values=True,
+    )
+    callback = {
+        key: values[-1]
+        for key, values in form_values.items()
+    }
+
+    signature = request.headers.get("X-Twilio-Signature", "")
+    request_url = str(request.url)
+
+    # stop requests that were not signed by twilio
+    if not twilio_request_validator.validate(
+        request_url,
+        callback,
+        signature,
+    ):
+        log("invalid twilio recording callback signature")
+        raise HTTPException(status_code=403, detail="forbidden")
+
+    call_sid = callback.get("CallSid", "")
+    recording_sid = callback.get("RecordingSid", "")
+    status = callback.get("RecordingStatus", "").lower()
+
+    try:
+        call_directory = get_call_artifact_directory(call_sid)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+    log(f"recording callback received for {call_sid}")
+
+    # save the result when twilio could not make a recording
+    if status == "absent":
+        merge_call_metadata(
+            call_sid,
+            {
+                "recording_sid": recording_sid,
+                "recording_status": "absent",
+                "recording_error_code": callback.get("ErrorCode", ""),
+            },
+        )
+        log(f"recording absent for {call_sid}")
+        return {"status": "ok"}
+
+    # skip updates that do not need more work
+    if status != "completed":
+        return {"status": "ignored"}
+
+    recording_url = callback.get("RecordingUrl", "")
+    # stop when twilio does not send a download link
+    if not recording_url:
+        raise HTTPException(status_code=400, detail="missing recording url")
+
+    recording_channels = optional_integer(
+        callback.get("RecordingChannels", "")
+    )
+    recording_metadata = {
+        "recording_sid": recording_sid,
+        "recording_status": "completed",
+        "recording_duration_seconds": optional_integer(
+            callback.get("RecordingDuration", "")
+        ),
+        "recording_channels": recording_channels,
+        "recording_start_time": callback.get("RecordingStartTime", ""),
+        "recording_source": callback.get("RecordingSource", ""),
+        "recording_track": callback.get("RecordingTrack", ""),
+    }
+    merge_call_metadata(call_sid, recording_metadata)
+
+    destination = call_directory / "recording.mp3"
+    try:
+        media_url = recording_media_url(recording_url, recording_channels)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+    try:
+        await asyncio.to_thread(
+            download_recording,
+            media_url,
+            destination,
+        )
+    except Exception as error:
+        log(f"recording download failed for {call_sid}")
+        raise HTTPException(
+            status_code=502,
+            detail="recording download failed",
+        ) from error
+
+    merge_call_metadata(
+        call_sid,
+        {"recording_file": "recording.mp3"},
+    )
+    log(f"recording completed {recording_sid}")
+    log(f"recording saved to {destination}")
     return {"status": "ok"}
 
 
@@ -67,8 +459,36 @@ def generate_test_tone(
 async def run_gemini_call(
     websocket: WebSocket,
     stream_sid: str,
+    call_sid: str,
+    scenario_name: str,
     scenario: dict,
 ):
+    # keep one transcript from the start to the end of the call
+    transcript = CallTranscript(call_sid, scenario_name)
+
+    try:
+        return await run_gemini_session(
+            websocket,
+            stream_sid,
+            scenario,
+            transcript,
+        )
+    finally:
+        try:
+            await transcript.cancel_office_flush()
+            transcript_path = transcript.save()
+            log(f"transcript saved to {transcript_path}")
+        except Exception as error:
+            log(f"transcript save failed for {call_sid} {error}")
+
+
+async def run_gemini_session(
+    websocket: WebSocket,
+    stream_sid: str,
+    scenario: dict,
+    transcript: CallTranscript,
+):
+    # run the existing live audio session
 
     client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
     model = os.environ["GEMINI_LIVE_MODEL"]
@@ -137,6 +557,93 @@ async def run_gemini_call(
         final_goodbye_mark = "final-goodbye-finished"
         drop_current_gemini_audio = False
         gemini_generation_active = False
+        gemini_turn_complete_event = asyncio.Event()
+        gemini_turn_complete_event.set()
+        diagnostic_office_turn = None
+        diagnostic_activity_end_time = None
+        diagnostic_audio_bytes = 0
+        diagnostic_acknowledged = True
+        gemini_stall_task = None
+
+        async def delayed_gemini_stall_log(
+            office_turn: int,
+            audio_bytes: int,
+            activity_end_time: float,
+        ) -> None:
+            # report when gemini stays quiet after an office turn
+            try:
+                await asyncio.sleep(3.0)
+
+                if (
+                    diagnostic_office_turn == office_turn
+                    and not diagnostic_acknowledged
+                ):
+                    seconds_since_activity_end = (
+                        time.monotonic() - activity_end_time
+                    )
+                    log(
+                        f"GEMINI STALL after office turn {office_turn} "
+                        f"audio_sent={audio_bytes} bytes "
+                        f"seconds_since_activity_end="
+                        f"{seconds_since_activity_end:.1f}"
+                    )
+
+            except asyncio.CancelledError:
+                pass
+
+        def start_gemini_stall_timer() -> None:
+            # start one diagnostic timer for the latest office turn
+            nonlocal gemini_stall_task
+
+            if gemini_stall_task is not None and not gemini_stall_task.done():
+                gemini_stall_task.cancel()
+
+            gemini_stall_task = asyncio.create_task(
+                delayed_gemini_stall_log(
+                    diagnostic_office_turn,
+                    diagnostic_audio_bytes,
+                    diagnostic_activity_end_time,
+                )
+            )
+
+        def acknowledge_gemini_activity() -> None:
+            # acknowledge the latest office turn only once
+            nonlocal diagnostic_acknowledged
+
+            if diagnostic_office_turn is None or diagnostic_acknowledged:
+                return
+
+            diagnostic_acknowledged = True
+            seconds_since_activity_end = (
+                time.monotonic() - diagnostic_activity_end_time
+            )
+
+            if gemini_stall_task is not None and not gemini_stall_task.done():
+                gemini_stall_task.cancel()
+
+            log(
+                f"Gemini acknowledged office turn "
+                f"{diagnostic_office_turn} after "
+                f"{seconds_since_activity_end:.2f} seconds"
+            )
+
+        async def cancel_gemini_stall_timer() -> None:
+            # stop the diagnostic timer when the call ends
+            nonlocal gemini_stall_task
+
+            pending_task = gemini_stall_task
+            gemini_stall_task = None
+
+            if pending_task is None:
+                return
+
+            if not pending_task.done():
+                pending_task.cancel()
+
+            try:
+                await pending_task
+            except asyncio.CancelledError:
+                pass
 
         async def send_to_twilio(message: dict):
             # keep websocket writes in order across both audio tasks
@@ -169,6 +676,7 @@ async def run_gemini_call(
 
                 if text:
                     log(f"PERSON: {text}")
+                    transcript.add_fragment("OFFICE", text)
 
             # print what gemini says
             if server_content.output_transcription:
@@ -180,7 +688,9 @@ async def run_gemini_call(
                 )
 
                 if text:
+                    acknowledge_gemini_activity()
                     log(f"GEMINI: {text}")
+                    transcript.add_fragment("PATIENT", text)
 
             # get audio made by gemini
             if server_content.model_turn:
@@ -193,7 +703,9 @@ async def run_gemini_call(
                     ):
                         continue
 
+                    acknowledge_gemini_activity()
                     gemini_generation_active = True
+                    gemini_turn_complete_event.clear()
 
                     if drop_current_gemini_audio:
                         continue
@@ -243,6 +755,8 @@ async def run_gemini_call(
             if not response.tool_call:
                 return
 
+            acknowledge_gemini_activity()
+
             function_responses = []
 
             for function_call in response.tool_call.function_calls:
@@ -288,13 +802,23 @@ async def run_gemini_call(
             nonlocal final_goodbye_mark_pending
             nonlocal drop_current_gemini_audio
             nonlocal gemini_generation_active
+            nonlocal diagnostic_office_turn
+            nonlocal diagnostic_activity_end_time
+            nonlocal diagnostic_audio_bytes
+            nonlocal diagnostic_acknowledged
 
             input_resample_state = None
             pcm_buffer = bytearray()
+            pre_roll_buffer = bytearray()
+            pre_roll_size = 3200
 
             # remember if the office is speaking and how long it is quiet
             activity_active = False
             silence_ms = 0.0
+            office_vad_turn = 0
+            silence_checkpoints_logged = set()
+            silence_reset_log_count = 0
+            office_turn_audio_bytes = 0
 
             # phone lines have noise so louder audio counts as speech
             speech_rms_threshold = 500
@@ -302,13 +826,15 @@ async def run_gemini_call(
             # end the turn after this much quiet audio
             end_of_speech_silence_ms = scenario.get(
                 "end_of_speech_silence_ms",
-                600.0,
+                1200.0,
             )
 
-            # hold about 100 ms of audio
-            gemini_chunk_size = 3200
+            # send about 40 ms of audio at a time
+            gemini_chunk_size = 1280
 
             async def send_buffered_audio(force: bool = False):
+                nonlocal office_turn_audio_bytes
+
                 # send full chunks or send everything when the turn ends
                 while len(pcm_buffer) >= gemini_chunk_size or (
                     force and pcm_buffer
@@ -323,6 +849,7 @@ async def run_gemini_call(
                             mime_type="audio/pcm;rate=16000",
                         )
                     )
+                    office_turn_audio_bytes += len(audio_chunk)
 
             while True:
 
@@ -349,16 +876,79 @@ async def run_gemini_call(
                     )
                     frame_rms = audioop.rms(pcm_8k, 2)
 
+                    # change phone audio from 8 khz to 16 khz
+                    (pcm_16k, input_resample_state) = audioop.ratecv(
+                        pcm_8k,
+                        2,
+                        1,
+                        8000,
+                        16000,
+                        input_resample_state,
+                    )
+
+                    speech_started_this_frame = False
+
+                    # keep only the latest inactive audio for speech start
+                    if not activity_active:
+                        pre_roll_buffer.extend(pcm_16k)
+
+                        if len(pre_roll_buffer) > pre_roll_size:
+                            del pre_roll_buffer[:-pre_roll_size]
+
                     # tell gemini when the office starts speaking
                     if frame_rms >= speech_rms_threshold:
+                        if (
+                            activity_active
+                            and silence_ms >= 200.0
+                            and silence_reset_log_count < 3
+                        ):
+                            log(
+                                f"VAD office turn {office_vad_turn} "
+                                f"silence reset at {silence_ms:.0f} ms "
+                                f"RMS={frame_rms}"
+                            )
+                            silence_reset_log_count += 1
+
                         silence_ms = 0.0
 
                         if not activity_active:
+                            if (
+                                gemini_generation_active
+                                and drop_current_gemini_audio
+                            ):
+                                log(
+                                    "waiting for interrupted gemini turn "
+                                    "to close before next office turn"
+                                )
+                                try:
+                                    await asyncio.wait_for(
+                                        gemini_turn_complete_event.wait(),
+                                        timeout=2.0,
+                                    )
+                                except asyncio.TimeoutError:
+                                    log(
+                                        "interrupted gemini turn close wait "
+                                        "timed out"
+                                    )
+
                             await session.send_realtime_input(
                                 activity_start=types.ActivityStart()
                             )
                             activity_active = True
-                            #log(f"VAD speech started (RMS={frame_rms})")
+                            speech_started_this_frame = True
+                            office_turn_audio_bytes = 0
+                            office_vad_turn += 1
+                            silence_checkpoints_logged.clear()
+                            silence_reset_log_count = 0
+                            log(
+                                f"VAD office turn {office_vad_turn} "
+                                f"started RMS={frame_rms}"
+                            )
+
+                            # send the pre roll including the speech start once
+                            pcm_buffer.extend(pre_roll_buffer)
+                            await send_buffered_audio(force=True)
+                            pre_roll_buffer.clear()
 
                             if finalizing_call or final_goodbye_mark_pending:
                                 finalizing_call = False
@@ -387,21 +977,25 @@ async def run_gemini_call(
                     elif activity_active:
                         silence_ms += frame_duration_ms
 
-                    # change phone audio from 8 khz to 16 khz
+                        for checkpoint_ms in (200.0, 400.0, 700.0):
+                            if (
+                                silence_ms >= checkpoint_ms
+                                and checkpoint_ms
+                                not in silence_checkpoints_logged
+                            ):
+                                log(
+                                    f"VAD office turn {office_vad_turn} "
+                                    f"silence reached "
+                                    f"{checkpoint_ms:.0f} ms"
+                                )
+                                silence_checkpoints_logged.add(
+                                    checkpoint_ms
+                                )
 
-                    (pcm_16k, input_resample_state) = audioop.ratecv(
-                        pcm_8k,
-                        2,
-                        1,
-                        8000,
-                        16000,
-                        input_resample_state,
-                    )
-
-                    pcm_buffer.extend(pcm_16k)
-
-                    # send audio to gemini when enough is ready
-                    await send_buffered_audio()
+                    # send only audio inside a manual activity
+                    if activity_active and not speech_started_this_frame:
+                        pcm_buffer.extend(pcm_16k)
+                        await send_buffered_audio()
 
                     if (
                         activity_active
@@ -409,15 +1003,24 @@ async def run_gemini_call(
                     ):
                         # send all speech before telling gemini the turn is done
                         await send_buffered_audio(force=True)
+                        diagnostic_office_turn = office_vad_turn
+                        diagnostic_activity_end_time = time.monotonic()
+                        diagnostic_audio_bytes = office_turn_audio_bytes
+                        diagnostic_acknowledged = False
                         await session.send_realtime_input(
                             activity_end=types.ActivityEnd()
                         )
+                        log(
+                            f"VAD office turn {office_vad_turn} ended after "
+                            f"{end_of_speech_silence_ms:.0f} ms silence "
+                            f"audio_sent={office_turn_audio_bytes} bytes"
+                        )
+                        if not diagnostic_acknowledged:
+                            start_gemini_stall_timer()
+                        transcript.schedule_office_flush()
                         activity_active = False
                         silence_ms = 0.0
-                        """log(
-                            f"VAD speech ended after "
-                            f"{end_of_speech_silence_ms:.0f} ms silence"
-                        )"""
+                        pcm_buffer.clear()
 
                 # get a message when twilio finishes playing audio
                 elif event == "mark":
@@ -437,6 +1040,9 @@ async def run_gemini_call(
                         final_goodbye_mark_pending = False
                         log("final goodbye playback completed")
                         log("intentional call end")
+                        await cancel_gemini_stall_timer()
+                        await transcript.cancel_office_flush()
+                        transcript.flush("OFFICE")
                         return "intentional_call_end"
 
                 # stop when the phone call ends
@@ -448,10 +1054,19 @@ async def run_gemini_call(
                     await send_buffered_audio(force=True)
 
                     if activity_active:
+                        log(
+                            f"VAD office turn {office_vad_turn} was still "
+                            f"active when twilio stopped "
+                            f"silence={silence_ms:.0f} ms "
+                            f"audio_sent={office_turn_audio_bytes} bytes"
+                        )
                         await session.send_realtime_input(
                             activity_end=types.ActivityEnd()
                         )
 
+                    await transcript.cancel_office_flush()
+                    await cancel_gemini_stall_timer()
+                    transcript.flush("OFFICE")
                     return "twilio_stop"
 
         # send gemini audio back into the phone call
@@ -487,11 +1102,14 @@ async def run_gemini_call(
 
                 # gemini finished one turn
 
+                acknowledge_gemini_activity()
                 log(f"Gemini turn {turn_number} complete.")
+                transcript.flush("PATIENT")
 
                 # allow audio from the next gemini turn after an interruption
                 drop_current_gemini_audio = False
                 gemini_generation_active = False
+                gemini_turn_complete_event.set()
 
                 if gemini_playback_pending:
                     if finalizing_call and final_goodbye_audio_sent:
@@ -524,38 +1142,41 @@ async def run_gemini_call(
 
         log("TWO-WAY GEMINI CALL IS LIVE")
 
-        # wait for twilio to stop or for an unrecoverable gemini error
-        done, pending = await asyncio.wait(
-            [phone_task, gemini_task,],
-            return_when=asyncio.FIRST_COMPLETED,
-        )
-
-        # stop the other direction after the call has reached an end state
-        for task in pending:
-            task.cancel()
-
-        # wait for stopped tasks to finish
-        for task in pending:
-            try:
-                await task
-
-            except asyncio.CancelledError:
-                pass
-
-        # show any error that happened
         call_end_reason = None
 
-        for task in done:
-            if task.cancelled():
-                continue
+        try:
+            # wait for twilio to stop or for an unrecoverable gemini error
+            done, pending = await asyncio.wait(
+                [phone_task, gemini_task,],
+                return_when=asyncio.FIRST_COMPLETED,
+            )
 
-            exception = task.exception()
+            # stop the other direction after the call has reached an end state
+            for task in pending:
+                task.cancel()
 
-            if exception:
-                raise exception
+            # wait for stopped tasks to finish
+            for task in pending:
+                try:
+                    await task
 
-            if task is phone_task:
-                call_end_reason = task.result()
+                except asyncio.CancelledError:
+                    pass
+
+            # show any error that happened
+            for task in done:
+                if task.cancelled():
+                    continue
+
+                exception = task.exception()
+
+                if exception:
+                    raise exception
+
+                if task is phone_task:
+                    call_end_reason = task.result()
+        finally:
+            await cancel_gemini_stall_timer()
 
     log("Gemini phone session closed.")
     return call_end_reason
@@ -609,6 +1230,8 @@ async def media_stream(websocket: WebSocket):
                 call_end_reason = await run_gemini_call(
                     websocket,
                     stream_sid,
+                    call_sid,
+                    scenario_name,
                     scenario,
                 )
 

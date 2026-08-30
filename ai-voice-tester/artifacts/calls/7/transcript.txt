@@ -1,0 +1,5 @@
+Scenario: spanish_support_test
+Artifact: 7
+
+[00:13.105] OFFICE: This call may be recorded for quality and training purposes. Para español oprima el dos. Thanks for calling Piedmont Orthopedics, part of Pretty Good AI. How may I help you today?
+[00:15.140] PATIENT: hola quisiera saber el horario de la oficina

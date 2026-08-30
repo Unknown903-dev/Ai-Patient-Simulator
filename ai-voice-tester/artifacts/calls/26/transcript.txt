@@ -1,0 +1,7 @@
+Scenario: provider_name_consistency_test
+Artifact: 26
+
+[00:13.872] OFFICE: This call may be recorded for quality and training purposes. para español oprima el dos. Thanks for calling Pivot Point Orthopedics, part of Pretty Good AI. How may I help you today?
+[00:27.083] OFFICE: Hello, thanks for calling Pittt Point Orthopedics. How can I help you today?
+[00:36.684] OFFICE: Are you still there?
+[00:47.466] OFFICE: I'm going to end the call now. Goodbye.
