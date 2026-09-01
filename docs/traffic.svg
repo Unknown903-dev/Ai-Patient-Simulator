@@ -8,7 +8,7 @@
 >
     <title id="title">Repository Traffic Analytics</title>
     <desc id="description">
-        Traffic analytics for Unknown903-dev/call-automation showing views,
+        Traffic analytics for Unknown903-dev/Ai-Patient-Simulator showing views,
         unique visitors, clones, and unique cloners.
     </desc>
 
@@ -63,7 +63,7 @@
     </text>
 
     <text x="40" y="66" class="subtitle">
-        Unknown903-dev/call-automation • latest 17 stored days
+        Unknown903-dev/Ai-Patient-Simulator • latest 18 stored days
     </text>
 
     
@@ -144,7 +144,7 @@
             
 
     <polyline
-        points="55.0,310.0 104.4,310.0 153.8,310.0 203.1,310.0 252.5,310.0 301.9,310.0 351.2,310.0 400.6,310.0 450.0,310.0 499.4,310.0 548.8,310.0 598.1,310.0 647.5,310.0 696.9,291.0 746.2,90.0 795.6,288.2 845.0,253.8"
+        points="55.0,310.0 101.5,310.0 147.9,310.0 194.4,310.0 240.9,310.0 287.4,310.0 333.8,310.0 380.3,310.0 426.8,310.0 473.2,310.0 519.7,310.0 566.2,310.0 612.6,310.0 659.1,291.0 705.6,90.0 752.1,288.2 798.5,253.8 845.0,305.8"
         fill="none"
         stroke="#58a6ff"
         stroke-width="3"
@@ -153,7 +153,7 @@
     />
 
     <polyline
-        points="55.0,310.0 104.4,310.0 153.8,310.0 203.1,310.0 252.5,310.0 301.9,310.0 351.2,310.0 400.6,310.0 450.0,310.0 499.4,310.0 548.8,310.0 598.1,310.0 647.5,310.0 696.9,309.3 746.2,307.9 795.6,309.3 845.0,309.3"
+        points="55.0,310.0 101.5,310.0 147.9,310.0 194.4,310.0 240.9,310.0 287.4,310.0 333.8,310.0 380.3,310.0 426.8,310.0 473.2,310.0 519.7,310.0 566.2,310.0 612.6,310.0 659.1,309.3 705.6,307.9 752.1,309.3 798.5,309.3 845.0,309.3"
         fill="none"
         stroke="#3fb950"
         stroke-width="3"
@@ -181,7 +181,7 @@
         text-anchor="end"
         class="axis"
     >
-        2026-08-30
+        2026-08-31
     </text>
 
     <line
@@ -192,19 +192,19 @@
         stroke="#30363d"
     />
 
-    <text x="65" y="405" class="metric">451</text>
+    <text x="65" y="405" class="metric">457</text>
     <text x="65" y="430" class="metric-label">Views</text>
 
-    <text x="265" y="405" class="metric">6</text>
+    <text x="265" y="405" class="metric">7</text>
     <text x="265" y="430" class="metric-label">Unique visitors</text>
 
-    <text x="505" y="405" class="metric">140</text>
+    <text x="505" y="405" class="metric">161</text>
     <text x="505" y="430" class="metric-label">Clones</text>
 
-    <text x="705" y="405" class="metric">84</text>
+    <text x="705" y="405" class="metric">97</text>
     <text x="705" y="430" class="metric-label">Unique cloners</text>
 
     <text x="40" y="475" class="subtitle">
-        Last updated: 2026-08-31 17:38 UTC
+        Last updated: 2026-09-01 14:55 UTC
     </text>
 </svg>
