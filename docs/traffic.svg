@@ -8,7 +8,7 @@
 >
     <title id="title">Repository Traffic Analytics</title>
     <desc id="description">
-        Traffic analytics for Unknown903-dev/Ai-Patient-Simulator showing views,
+        Traffic analytics for Unknown903-dev/Ai-Automated-Patient-Call showing views,
         unique visitors, clones, and unique cloners.
     </desc>
 
@@ -63,7 +63,7 @@
     </text>
 
     <text x="40" y="66" class="subtitle">
-        Unknown903-dev/Ai-Patient-Simulator • latest 30 stored days
+        Unknown903-dev/Ai-Automated-Patient-Call • latest 30 stored days
     </text>
 
     
@@ -205,6 +205,6 @@
     <text x="705" y="430" class="metric-label">Unique cloners</text>
 
     <text x="40" y="475" class="subtitle">
-        Last updated: 2026-09-25 15:18 UTC
+        Last updated: 2026-09-26 14:31 UTC
     </text>
 </svg>
